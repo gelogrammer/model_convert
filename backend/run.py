@@ -10,6 +10,15 @@ from app import app, socketio
 os.makedirs('models', exist_ok=True)
 print("Starting Speech Emotion Recognition backend server...")
 
+# CORS middleware to ensure headers are properly set
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
 # Ensure the application is importable by Gunicorn
 application = app
 
