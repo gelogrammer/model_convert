@@ -4,6 +4,11 @@ import { io, Socket } from 'socket.io-client';
 let socket: Socket | null = null;
 let heartbeatInterval: number | null = null;
 
+// Get backend URL from environment variables
+const getBackendUrl = () => {
+  return import.meta.env.VITE_BACKEND_URL || '/';
+};
+
 // WebSocket event handlers
 interface WebSocketHandlers {
   onConnect?: () => void;
@@ -28,8 +33,8 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
     clearInterval(heartbeatInterval);
   }
 
-  // Create new connection - using relative URL for better proxy support
-  socket = io('/', {
+  // Create new connection using backend URL from environment
+  socket = io(getBackendUrl(), {
     transports: ['websocket'],
     reconnection: true,
     reconnectionAttempts: 10,

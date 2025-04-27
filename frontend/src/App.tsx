@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, LinearProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import AudioCapture from './components/AudioCapture';
 import EmotionDisplay from './components/EmotionDisplay';
 import SpeechTempoDisplay from './components/SpeechRateDisplay';

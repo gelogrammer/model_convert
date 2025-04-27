@@ -1,0 +1,23 @@
+# Ignore development and test files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ignore Git files
+.git/
+.gitignore
+
+# Ignore editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore ML model development files (keep only the final models)
+*.h5
+*.pth
+!models/SER.h5
+!models/ASR.pth 

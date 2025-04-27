@@ -7,6 +7,7 @@ import librosa
 import base64
 import io
 import wave
+import soundfile as sf
 
 class AudioProcessor:
     """Audio processing for speech emotion recognition"""
@@ -42,8 +43,24 @@ class AudioProcessor:
         audio_file.save(temp_file)
         temp_file.seek(0)
         
-        # Load audio file
-        audio_data, _ = librosa.load(temp_file, sr=self.sample_rate, mono=True)
+        try:
+            # Try using librosa first
+            audio_data, _ = librosa.load(temp_file, sr=self.sample_rate, mono=True)
+        except Exception as e:
+            # Fall back to soundfile if librosa fails
+            temp_file.seek(0)
+            try:
+                audio_data, sample_rate = sf.read(temp_file)
+                # Convert to mono if needed
+                if len(audio_data.shape) > 1:
+                    audio_data = np.mean(audio_data, axis=1)
+                # Resample if needed
+                if sample_rate != self.sample_rate:
+                    audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=self.sample_rate)
+            except Exception as sf_error:
+                print(f"Error loading audio with soundfile: {sf_error}")
+                # If all else fails, return empty array
+                audio_data = np.zeros(self.sample_rate)  # 1 second of silence
         
         return audio_data
     
@@ -58,10 +75,30 @@ class AudioProcessor:
             Numpy array of audio data
         """
         # Decode base64
-        audio_bytes = base64.b64decode(base64_audio.split(',')[1] if ',' in base64_audio else base64_audio)
-        
-        # Convert to numpy array
-        audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
+        try:
+            audio_bytes = base64.b64decode(base64_audio.split(',')[1] if ',' in base64_audio else base64_audio)
+            
+            # Try to interpret as float32 array
+            try:
+                audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
+            except Exception as e:
+                # If that fails, try wav format
+                try:
+                    with io.BytesIO(audio_bytes) as wav_io:
+                        with wave.open(wav_io, 'rb') as wav_file:
+                            frames = wav_file.readframes(wav_file.getnframes())
+                            audio_data = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                except Exception as wave_error:
+                    # Last attempt with soundfile
+                    try:
+                        with io.BytesIO(audio_bytes) as sf_io:
+                            audio_data, _ = sf.read(sf_io)
+                    except Exception as sf_error:
+                        print(f"Failed to decode audio: {sf_error}")
+                        audio_data = np.zeros(self.sample_rate, dtype=np.float32)
+        except Exception as e:
+            print(f"Failed to decode base64 audio: {e}")
+            audio_data = np.zeros(self.sample_rate, dtype=np.float32)
         
         return audio_data
     

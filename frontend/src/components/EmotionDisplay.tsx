@@ -8,8 +8,7 @@ import {
   BarElement,
   Title,
   Tooltip,
-  Legend,
-  ChartData
+  Legend
 } from 'chart.js';
 
 // Register Chart.js components

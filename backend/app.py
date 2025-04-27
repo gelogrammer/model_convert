@@ -17,10 +17,11 @@ from asr_service import ASRService
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+# Update CORS settings to allow requests from Cloudflare Pages
+CORS(app, origins=["https://a3f65a7b.talktwanalyzer.pages.dev", "http://localhost:5173"])
 
 # Configure Socket.IO
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins=["https://a3f65a7b.talktwanalyzer.pages.dev", "http://localhost:5173"], async_mode='eventlet')
 
 # Initialize model services
 model_service = None
