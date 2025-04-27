@@ -4,6 +4,7 @@ Run script for the Flask application.
 
 import os
 import sys
+from flask import request
 from app import app, socketio
 
 # Create models directory if it doesn't exist
@@ -13,7 +14,26 @@ print("Starting Speech Emotion Recognition backend server...")
 # CORS middleware to ensure headers are properly set
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
+    # Get the origin from the request
+    origin = request.headers.get('Origin', '')
+    
+    # Allowed domains - update this list as needed
+    allowed_origins = [
+        'https://a4bfa875.talktwanalyzer.pages.dev',
+        'https://2ef4f3ff.talktwanalyzer.pages.dev',
+        'https://fa06b053.talktwanalyzer.pages.dev',
+        'https://535a4872.talktwanalyzer.pages.dev',
+        'https://talktwanalyzer.pages.dev',
+        'http://localhost:3000'
+    ]
+    
+    # Check if the origin is in our allowed list
+    if origin in allowed_origins:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+    else:
+        # For development, allow any origin
+        response.headers.add('Access-Control-Allow-Origin', '*')
+    
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Allow-Credentials', 'true')
