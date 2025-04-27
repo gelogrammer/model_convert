@@ -89,6 +89,10 @@ function App() {
     const setupWebSocket = async () => {
       try {
         setLoading(true);
+        
+        // Log the backend URL for debugging
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || '/';
+        console.log('Using backend URL:', backendUrl);
 
         // Initialize WebSocket
         initializeWebSocket({
@@ -149,15 +153,15 @@ function App() {
 
         // Initialize model
         try {
-          const response = await fetch('/api/initialize', {
-            method: 'POST',
+          const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+          const apiUrl = backendUrl ? `${backendUrl}/api/initialize` : '/api/initialize';
+          console.log('Calling initialize API at:', apiUrl);
+          
+          const response = await fetch(apiUrl, {
+            method: 'GET',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              model_path: 'models/SER.h5',
-              asr_model_path: 'models/ASR.pth'
-            }),
           });
 
           const data = await response.json();

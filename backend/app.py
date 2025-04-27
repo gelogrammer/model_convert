@@ -17,11 +17,11 @@ from asr_service import ASRService
 
 # Initialize Flask app
 app = Flask(__name__)
-# Update CORS settings to allow requests from Cloudflare Pages
-CORS(app, origins=["https://a3f65a7b.talktwanalyzer.pages.dev", "http://localhost:5173"])
+# Allow all origins for debugging
+CORS(app, origins="*", supports_credentials=True)
 
 # Configure Socket.IO
-socketio = SocketIO(app, cors_allowed_origins=["https://a3f65a7b.talktwanalyzer.pages.dev", "http://localhost:5173"], async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Initialize model services
 model_service = None
@@ -71,14 +71,20 @@ def health_check():
     """Health check endpoint"""
     return jsonify({"status": "ok", "message": "Speech Emotion Recognition API is running"})
 
-@app.route('/api/initialize', methods=['POST'])
+@app.route('/api/initialize', methods=['GET', 'POST'])
 def initialize_model():
     """Initialize the model with the provided path"""
     global model_service, audio_processor, asr_service
     
-    data = request.json
-    ser_model_path = data.get('model_path', 'models/SER.h5')
-    asr_model_path = data.get('asr_model_path', 'models/ASR.pth')
+    # For GET requests, use default paths
+    if request.method == 'GET':
+        ser_model_path = 'models/SER.h5'
+        asr_model_path = 'models/ASR.pth'
+    else:
+        # For POST requests, get paths from JSON payload
+        data = request.json or {}
+        ser_model_path = data.get('model_path', 'models/SER.h5')
+        asr_model_path = data.get('asr_model_path', 'models/ASR.pth')
     
     try:
         # Initialize SER model service
