@@ -1,0 +1,11 @@
+{
+  "name": "speech-emotion-app",
+  "version": "1.0.0",
+  "description": "Real-Time Speech Rate and Emotion Feedback Application",
+  "scripts": {
+    "start:frontend": "cd frontend && npm run dev",
+    "start:backend": "cd backend && python run.py",
+    "start": "npm run start:backend & npm run start:frontend"
+  },
+  "private": true
+} 
