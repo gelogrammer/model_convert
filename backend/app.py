@@ -6,7 +6,7 @@ import os
 import json
 import numpy as np
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO, emit
 import eventlet
 
@@ -17,11 +17,18 @@ from asr_service import ASRService
 
 # Initialize Flask app
 app = Flask(__name__)
-# Allow all origins for debugging
-CORS(app, origins="*", supports_credentials=True)
 
-# Configure Socket.IO
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# More detailed CORS configuration for Railway
+CORS(app, 
+     origins="*", 
+     methods=["GET", "POST", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+     supports_credentials=True)
+
+# Configure Socket.IO with more detailed CORS
+socketio = SocketIO(app, 
+                   cors_allowed_origins="*", 
+                   async_mode='eventlet')
 
 # Initialize model services
 model_service = None
@@ -67,14 +74,21 @@ def initialize_on_startup():
 initialize_on_startup()
 
 @app.route('/api/health', methods=['GET'])
+@cross_origin()
 def health_check():
     """Health check endpoint"""
     return jsonify({"status": "ok", "message": "Speech Emotion Recognition API is running"})
 
-@app.route('/api/initialize', methods=['GET', 'POST'])
+@app.route('/api/initialize', methods=['GET', 'POST', 'OPTIONS'])
+@cross_origin()
 def initialize_model():
     """Initialize the model with the provided path"""
     global model_service, audio_processor, asr_service
+    
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
     
     # For GET requests, use default paths
     if request.method == 'GET':
