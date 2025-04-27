@@ -6,7 +6,9 @@ let heartbeatInterval: number | null = null;
 
 // Get backend URL from environment variables
 const getBackendUrl = () => {
-  return import.meta.env.VITE_BACKEND_URL || '/';
+  const url = import.meta.env.VITE_BACKEND_URL || '/';
+  console.log('WebSocket connecting to:', url);
+  return url;
 };
 
 // WebSocket event handlers
@@ -33,13 +35,17 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
     clearInterval(heartbeatInterval);
   }
 
-  // Create new connection using backend URL from environment
+  // Create new connection using backend URL from environment with more resilient options
   socket = io(getBackendUrl(), {
-    transports: ['websocket'],
+    path: '/socket.io',
+    transports: ['websocket', 'polling'],
     reconnection: true,
-    reconnectionAttempts: 10,
+    reconnectionAttempts: 20,
     reconnectionDelay: 1000,
-    timeout: 5000,
+    reconnectionDelayMax: 5000,
+    randomizationFactor: 0.5,
+    timeout: 20000,
+    autoConnect: true,
     forceNew: true
   });
 

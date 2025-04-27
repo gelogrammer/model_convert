@@ -161,7 +161,10 @@ function App() {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',
+              'Accept': 'application/json',
             },
+            mode: 'cors',
+            credentials: 'same-origin',
           });
 
           const data = await response.json();
