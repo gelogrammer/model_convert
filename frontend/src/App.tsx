@@ -115,39 +115,14 @@ function App() {
             setShowReconnecting(false);
             setReconnectAttempt(0);
           },
-          onEmotionResult: (result) => {
-            setEmotionResult(result);
-            setLastUpdateTime(new Date());
-            
-            // Set speaking state based on is_speech flag
-            if (result.is_speech) {
-              setIsSpeaking(true);
-              
-              // Clear any existing timeout
-              if (speechTimeoutRef.current) {
-                window.clearTimeout(speechTimeoutRef.current);
-              }
-              
-              // Set a new timeout to reset speaking state if no speech is detected for 3 seconds
-              speechTimeoutRef.current = window.setTimeout(() => {
-                setIsSpeaking(false);
-                speechTimeoutRef.current = null;
-              }, 3000);
+          onEmotionResult: (data) => {
+            if (data && isCapturing) {
+              handleEmotionResult(data);
             }
-            
-            // Show processing indicator for 500ms
-            setProcessingPacket(true);
-            if (processingTimeoutRef.current) {
-              window.clearTimeout(processingTimeoutRef.current);
-            }
-            
-            processingTimeoutRef.current = window.setTimeout(() => {
-              setProcessingPacket(false);
-              processingTimeoutRef.current = null;
-            }, 500);
           },
-          onError: (err) => {
-            setError(err.message);
+          onError: (error) => {
+            console.error('WebSocket error in App:', error);
+            setError(`Connection error: ${error.message}`);
           }
         });
 
@@ -270,6 +245,38 @@ function App() {
         confidence: characteristics.pronunciation.confidence 
       }
     };
+  };
+
+  const handleEmotionResult = (result: EmotionResult) => {
+    setEmotionResult(result);
+    setLastUpdateTime(new Date());
+    
+    // Set speaking state based on is_speech flag
+    if (result.is_speech) {
+      setIsSpeaking(true);
+      
+      // Clear any existing timeout
+      if (speechTimeoutRef.current) {
+        window.clearTimeout(speechTimeoutRef.current);
+      }
+      
+      // Set a new timeout to reset speaking state if no speech is detected for 3 seconds
+      speechTimeoutRef.current = window.setTimeout(() => {
+        setIsSpeaking(false);
+        speechTimeoutRef.current = null;
+      }, 3000);
+    }
+    
+    // Show processing indicator for 500ms
+    setProcessingPacket(true);
+    if (processingTimeoutRef.current) {
+      window.clearTimeout(processingTimeoutRef.current);
+    }
+    
+    processingTimeoutRef.current = window.setTimeout(() => {
+      setProcessingPacket(false);
+      processingTimeoutRef.current = null;
+    }, 500);
   };
 
   return (
