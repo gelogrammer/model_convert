@@ -1,41 +1,68 @@
 import { useState, useEffect, useRef } from 'react';
-import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, LinearProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline, alpha } from '@mui/material';
 import AudioCapture from './components/AudioCapture';
 import EmotionDisplay from './components/EmotionDisplay';
 import SpeechTempoDisplay from './components/SpeechRateDisplay';
 import Feedback from './components/Feedback';
 import SpeechCharacteristics from './components/SpeechCharacteristics';
+import EmotionCalibration from './components/EmotionCalibration';
 import { initializeWebSocket, closeWebSocket } from './services/websocket';
 import './App.css';
 
 // Create a theme
 const theme = createTheme({
   palette: {
+    mode: 'dark',
     primary: {
-      main: '#3f51b5',
+      main: '#7C3AED', // Vibrant purple
     },
     secondary: {
-      main: '#f50057',
+      main: '#06B6D4', // Cyan
     },
     background: {
-      default: '#f5f7fa',
-      paper: '#ffffff'
+      default: '#0F172A', // Dark blue-gray
+      paper: '#1E293B'   // Slightly lighter blue-gray
+    },
+    success: {
+      main: '#10B981'    // Emerald green
+    },
+    error: {
+      main: '#EF4444'    // Red
+    },
+    warning: {
+      main: '#F59E0B'    // Amber
+    },
+    text: {
+      primary: '#F1F5F9', // Light gray/white
+      secondary: '#94A3B8' // Medium gray
     }
   },
   typography: {
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
     h6: {
+      fontWeight: 700,
+      letterSpacing: '0.02em',
+    },
+    h5: {
+      fontWeight: 700,
+      letterSpacing: '0.02em',
+    },
+    button: {
       fontWeight: 600,
     }
   },
   shape: {
-    borderRadius: 12
+    borderRadius: 16
   },
   components: {
     MuiPaper: {
+      defaultProps: {
+        elevation: 0,
+      },
       styleOverrides: {
         root: {
-          boxShadow: '0 4px 20px rgba(0,0,0,0.05)'
+          backgroundImage: 'none',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
         }
       }
     },
@@ -44,15 +71,59 @@ const theme = createTheme({
         root: {
           textTransform: 'none',
           fontWeight: 600,
-          borderRadius: 8,
-          padding: '10px 24px'
+          borderRadius: 12,
+          padding: '12px 28px',
+          transition: '0.3s',
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: '0 6px 20px rgba(124, 58, 237, 0.4)',
+          },
+        },
+        containedPrimary: {
+          background: 'linear-gradient(90deg, #7C3AED 0%, #8B5CF6 100%)',
+        },
+        containedError: {
+          background: 'linear-gradient(90deg, #DC2626 0%, #EF4444 100%)',
         }
       }
-    }
+    },
+    MuiAppBar: {
+      styleOverrides: {
+        root: {
+          backdropFilter: 'blur(10px)',
+          backgroundColor: 'rgba(30, 41, 59, 0.8)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        }
+      }
+    },
+    MuiToolbar: {
+      styleOverrides: {
+        root: {
+          height: 80,
+        }
+      }
+    },
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          scrollbarWidth: 'thin',
+          '&::-webkit-scrollbar': {
+            width: '8px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: '#0F172A',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: '#334155',
+            borderRadius: '4px',
+          },
+        },
+      },
+    },
   }
 });
 
-// Define emotion result type
+// Define emotion result type and calibration data interface
 interface EmotionResult {
   emotion: string;
   confidence: number;
@@ -64,7 +135,69 @@ interface EmotionResult {
     tempo: { category: string; confidence: number };
     pronunciation: { category: string; confidence: number };
   };
+  belowThreshold?: boolean;
+  filteredEmotion?: string;
 }
+
+// Local interface for calibration data
+interface CalibrationData {
+  emotion: string;
+  userFeedback: {
+    correctness: 'correct' | 'incorrect' | 'unsure';
+    actualEmotion?: string;
+  };
+  timestamp: number;
+}
+
+// Helper function to apply calibration thresholds
+const applyCalibrationToResult = (
+  rawResult: EmotionResult | null, 
+  thresholds: Record<string, number>
+): EmotionResult | null => {
+  if (!rawResult) return null;
+  
+  const { emotion, confidence } = rawResult;
+  const threshold = thresholds[emotion] || 0.6;
+  
+  if (confidence < threshold) {
+    return {
+      ...rawResult,
+      belowThreshold: true as any,
+      filteredEmotion: 'uncertain' as any
+    };
+  }
+  
+  return rawResult;
+};
+
+// Load confidence thresholds from local storage
+const loadConfidenceThresholds = (): Record<string, number> => {
+  try {
+    const savedThresholds = localStorage.getItem('emotionConfidenceThresholds');
+    return savedThresholds 
+      ? JSON.parse(savedThresholds) 
+      : {
+          anger: 0.6,
+          disgust: 0.6,
+          fear: 0.6,
+          happiness: 0.6,
+          sadness: 0.6,
+          surprise: 0.6,
+          neutral: 0.5,
+        };
+  } catch (e) {
+    console.error('Failed to load confidence thresholds:', e);
+    return {
+      anger: 0.6,
+      disgust: 0.6,
+      fear: 0.6,
+      happiness: 0.6,
+      sadness: 0.6,
+      surprise: 0.6,
+      neutral: 0.5,
+    };
+  }
+};
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -82,6 +215,7 @@ function App() {
   
   // Speech detection timeout
   const speechTimeoutRef = useRef<number | null>(null);
+  const [calibratedEmotionResult, setCalibratedEmotionResult] = useState<EmotionResult | null>(null);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -198,6 +332,17 @@ function App() {
     };
   }, []);
 
+  // Apply calibration to emotion results
+  useEffect(() => {
+    if (emotionResult) {
+      const confidenceThresholds = loadConfidenceThresholds();
+      const calibratedResult = applyCalibrationToResult(emotionResult, confidenceThresholds);
+      setCalibratedEmotionResult(calibratedResult);
+    } else {
+      setCalibratedEmotionResult(null);
+    }
+  }, [emotionResult]);
+
   // Handle start/stop capturing
   const toggleCapturing = () => {
     if (isCapturing) {
@@ -265,15 +410,55 @@ function App() {
     };
   };
 
+  // Handle calibration data updates
+  const handleCalibrationUpdate = (_: CalibrationData[]) => {
+    // Recalibrate current result if it exists
+    if (emotionResult) {
+      const confidenceThresholds = loadConfidenceThresholds();
+      const calibratedResult = applyCalibrationToResult(emotionResult, confidenceThresholds);
+      setCalibratedEmotionResult(calibratedResult);
+    }
+  };
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <div className="App">
-        <AppBar position="static" elevation={0} sx={{ backgroundColor: 'white', color: 'text.primary' }}>
+      <div className="App" style={{ minHeight: '100vh', backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.05) 0%, rgba(6, 182, 212, 0.05) 90%)' }}>
+        <AppBar position="fixed" elevation={0}>
           <Toolbar>
-            <Typography variant="h6" component="div" sx={{ flexGrow: 1, fontWeight: 700, color: theme.palette.primary.main }}>
-              Real-Time Speech Emotion & Rate Feedback
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Box 
+                sx={{ 
+                  width: 40, 
+                  height: 40, 
+                  borderRadius: '12px', 
+                  background: 'linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  mr: 2
+                }}
+              >
+                <Typography variant="h6" sx={{ color: 'white' }}>RT</Typography>
+              </Box>
+              <Typography 
+                variant="h5" 
+                component="div" 
+                sx={{ 
+                  flexGrow: 1, 
+                  fontWeight: 700, 
+                  background: 'linear-gradient(90deg, #7C3AED 0%, #06B6D4 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  mr: 2,
+                  display: { xs: 'none', sm: 'block' }
+                }}
+              >
+                SpeechSense AI
+              </Typography>
+            </Box>
+            
+            <Box sx={{ flexGrow: 1 }} />
             
             {/* Connection status indicator */}
             <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
@@ -294,17 +479,37 @@ function App() {
                   } 
                 }}
               >
-                <Typography variant="body2" sx={{ ml: 2 }}>
-                  {isConnected ? 'Connected' : 'Disconnected'}
-                </Typography>
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  py: 0.75, 
+                  px: 2, 
+                  borderRadius: '8px',
+                  backgroundColor: isConnected ? alpha(theme.palette.success.main, 0.1) : alpha(theme.palette.error.main, 0.1)
+                }}>
+                  <Typography variant="body2" sx={{ 
+                    color: isConnected ? theme.palette.success.main : theme.palette.error.main,
+                    fontWeight: 600,
+                  }}>
+                    {isConnected ? 'Connected' : 'Disconnected'}
+                  </Typography>
+                </Box>
               </Badge>
             </Box>
             
             {/* Last update time */}
             {lastUpdateTime && (
-              <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                Last update: {getLastUpdateText()}
-              </Typography>
+              <Box sx={{ 
+                backgroundColor: alpha(theme.palette.background.paper, 0.3),
+                py: 0.75, 
+                px: 2, 
+                borderRadius: '8px',
+                display: { xs: 'none', md: 'block' }
+              }}>
+                <Typography variant="body2" sx={{ color: theme.palette.text.secondary }}>
+                  Last update: {getLastUpdateText()}
+                </Typography>
+              </Box>
             )}
           </Toolbar>
         </AppBar>
@@ -314,7 +519,16 @@ function App() {
           open={showReconnecting} 
           anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
         >
-          <Alert severity="warning" sx={{ width: '100%', borderRadius: theme.shape.borderRadius }}>
+          <Alert 
+            severity="warning" 
+            sx={{ 
+              width: '100%', 
+              borderRadius: theme.shape.borderRadius,
+              backgroundColor: alpha(theme.palette.warning.main, 0.15),
+              color: theme.palette.warning.main,
+              border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`
+            }}
+          >
             {reconnectAttempt > 0 
               ? `Reconnecting to server... (Attempt ${reconnectAttempt})` 
               : 'Connection lost. Reconnecting...'
@@ -322,26 +536,45 @@ function App() {
           </Alert>
         </Snackbar>
 
-        <Container maxWidth="lg" sx={{ mt: 4, pb: 4 }}>
+        <Container maxWidth="lg" sx={{ pt: 12, pb: 6 }}>
           {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-              <CircularProgress />
-              <Typography variant="h6" sx={{ ml: 2 }}>
-                Initializing...
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              height: '70vh',
+              textAlign: 'center'
+            }}>
+              <CircularProgress size={60} thickness={4} sx={{ mb: 3 }} />
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                Initializing AI Speech Analysis
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Please wait while we set up the machine learning model
               </Typography>
             </Box>
           ) : error ? (
-            <Paper sx={{ p: 3, textAlign: 'center', bgcolor: '#ffebee', borderRadius: theme.shape.borderRadius }}>
-              <Typography variant="h6" color="error">
-                Error: {error}
+            <Paper sx={{ 
+              p: 4, 
+              textAlign: 'center', 
+              backgroundColor: alpha(theme.palette.error.main, 0.1),
+              borderRadius: theme.shape.borderRadius,
+              border: `1px solid ${alpha(theme.palette.error.main, 0.3)}`
+            }}>
+              <Typography variant="h6" color="error" sx={{ mb: 2 }}>
+                Connection Error
               </Typography>
-              <Typography variant="body1" sx={{ mt: 2 }}>
+              <Typography variant="body1">
+                {error}
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>
                 Please make sure the backend server is running and try again.
               </Typography>
             </Paper>
           ) : (
             <>
-              <Box sx={{ mb: 4, display: 'flex', justifyContent: 'center' }}>
+              <Box sx={{ mb: 5, mt: 2, display: 'flex', justifyContent: 'center' }}>
                 <Button
                   variant="contained"
                   color={isCapturing ? "error" : "primary"}
@@ -350,20 +583,36 @@ function App() {
                   size="large"
                   sx={{ 
                     px: 4, 
-                    py: 1.5, 
-                    fontSize: '1rem',
-                    boxShadow: isCapturing ? '0 4px 20px rgba(244, 67, 54, 0.2)' : '0 4px 20px rgba(63, 81, 181, 0.2)'
+                    py: 2, 
+                    fontSize: '1.1rem',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    '&::before': isCapturing ? {} : {
+                      content: '""',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      animation: 'pulse-animation 2s infinite',
+                    },
+                    '@keyframes pulse-animation': {
+                      '0%': { opacity: 0.6, transform: 'scale(1)' },
+                      '50%': { opacity: 0, transform: 'scale(1.2)' },
+                      '100%': { opacity: 0.6, transform: 'scale(1)' },
+                    }
                   }}
                 >
-                  {isCapturing ? "STOP CAPTURING" : "START CAPTURING"}
+                  {isCapturing ? "STOP CAPTURE" : "START CAPTURE"}
                 </Button>
               </Box>
 
               <Box sx={{ 
                 display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, 
-                gap: 3,
-                mb: 3
+                gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, 
+                gap: 4,
+                mb: 4
               }}>
                 <Box>
                   <AudioCapture
@@ -373,7 +622,7 @@ function App() {
                 </Box>
                 <Box>
                   <EmotionDisplay
-                    emotionResult={isSpeaking ? emotionResult : null}
+                    emotionResult={isSpeaking ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
                 </Box>
@@ -381,9 +630,9 @@ function App() {
 
               <Box sx={{ 
                 display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, 
-                gap: 3,
-                mb: 3
+                gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, 
+                gap: 4,
+                mb: 4
               }}>
                 <Box>
                   <SpeechTempoDisplay
@@ -392,25 +641,53 @@ function App() {
                   />
                 </Box>
                 <Box>
-                  <Feedback
+                  <EmotionCalibration
                     emotionResult={isSpeaking ? emotionResult : null}
                     isCapturing={isCapturing}
+                    onCalibrationUpdate={handleCalibrationUpdate}
                   />
                 </Box>
               </Box>
               
-              {/* Speech Characteristics Display */}
-              {emotionResult?.speech_characteristics && (
-                <Box sx={{ mt: 2 }}>
-                  <SpeechCharacteristics
-                    characteristics={formatSpeechCharacteristics(emotionResult.speech_characteristics)}
+              <Box sx={{ 
+                display: 'grid', 
+                gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, 
+                gap: 4,
+                mb: 4
+              }}>
+                <Box>
+                  {emotionResult?.speech_characteristics && (
+                    <SpeechCharacteristics
+                      characteristics={formatSpeechCharacteristics(emotionResult.speech_characteristics)}
+                      isCapturing={isCapturing}
+                    />
+                  )}
+                </Box>
+                <Box>
+                  <Feedback
+                    emotionResult={isSpeaking ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
                 </Box>
-              )}
+              </Box>
             </>
           )}
         </Container>
+        
+        {/* Footer */}
+        <Box 
+          component="footer" 
+          sx={{ 
+            py: 3, 
+            textAlign: 'center', 
+            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+            mt: 'auto'
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Real-Time Speech Analysis • Powered by AI
+          </Typography>
+        </Box>
       </div>
     </ThemeProvider>
   );

@@ -2,7 +2,9 @@ import { io, Socket } from 'socket.io-client';
 
 // WebSocket connection
 let socket: Socket | null = null;
-let heartbeatInterval: number | null = null;
+let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let connectionRetryCount = 0;
+const MAX_RETRIES = 5;
 
 // WebSocket event handlers
 interface WebSocketHandlers {
@@ -28,33 +30,106 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
     clearInterval(heartbeatInterval);
   }
 
-  // Create new connection - using relative URL for better proxy support
-  socket = io('/', {
-    transports: ['websocket'],
+  try {
+    // Test backend connectivity first with a fetch request
+    testBackendConnectivity()
+      .then(isAvailable => {
+        if (!isAvailable) {
+          console.warn('Backend server is not available, operating in fallback mode');
+          handlers.onError?.(new Error('Backend server is not available. Running in offline mode.'));
+          return;
+        }
+        
+        // Create new connection 
+        connectSocket(handlers);
+      })
+      .catch(error => {
+        console.error('Error testing backend connectivity:', error);
+        handlers.onError?.(new Error('Failed to connect to backend. Running in offline mode.'));
+      });
+    
+    return socket;
+  } catch (error) {
+    console.error('Failed to initialize WebSocket:', error);
+    handlers.onError?.(new Error(`WebSocket initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
+    return null;
+  }
+};
+
+/**
+ * Test backend connectivity before attempting to connect WebSocket
+ */
+const testBackendConnectivity = async (): Promise<boolean> => {
+  try {
+    // Use the health endpoint to check if backend is up
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    
+    const response = await fetch('/api/health', {
+      method: 'GET',
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    return response.ok;
+  } catch (error) {
+    console.warn('Backend connectivity test failed:', error);
+    return false;
+  }
+};
+
+/**
+ * Connect to WebSocket server
+ */
+const connectSocket = (handlers: WebSocketHandlers) => {
+  const serverUrl = window.location.hostname === 'localhost' ? 
+    'http://localhost:5001' : window.location.origin;
+  
+  console.log(`Connecting to WebSocket server at ${serverUrl}`);
+  
+  socket = io(serverUrl, {
+    transports: ['websocket', 'polling'], // Add polling as fallback
     reconnection: true,
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,
-    timeout: 5000,
-    forceNew: true
+    timeout: 10000, // Increase timeout
+    forceNew: true,
+    path: '/socket.io/'
   });
 
   // Setup event handlers
   socket.on('connect', () => {
     console.log('WebSocket connected');
+    connectionRetryCount = 0;
     handlers.onConnect?.();
     
     // Start heartbeat after connection
     startHeartbeat();
   });
 
-  socket.on('disconnect', () => {
-    console.log('WebSocket disconnected');
+  socket.on('disconnect', (reason) => {
+    console.log(`WebSocket disconnected: ${reason}`);
     handlers.onDisconnect?.();
     
     // Clear heartbeat on disconnect
     if (heartbeatInterval) {
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
+    }
+  });
+
+  socket.on('connect_error', (error) => {
+    console.error('WebSocket connection error:', error);
+    
+    // Count retries to avoid infinite retry loop
+    connectionRetryCount++;
+    
+    if (connectionRetryCount >= MAX_RETRIES) {
+      console.error(`Failed to connect after ${MAX_RETRIES} attempts, giving up`);
+      socket?.close();
+      handlers.onError?.(new Error(`Connection failed after ${MAX_RETRIES} attempts. Backend may be unavailable.`));
+    } else {
+      handlers.onError?.(new Error(`Connection error: ${error.message}`));
     }
   });
 
@@ -65,6 +140,7 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
 
   socket.on('reconnect', () => {
     console.log('WebSocket reconnected');
+    connectionRetryCount = 0;
     handlers.onReconnect?.();
     
     // Restart heartbeat after reconnection
@@ -83,8 +159,6 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
 
   // Start heartbeat immediately
   startHeartbeat();
-
-  return socket;
 };
 
 /**
@@ -117,6 +191,9 @@ export const closeWebSocket = () => {
     socket.close();
     socket = null;
   }
+  
+  // Reset retry counter
+  connectionRetryCount = 0;
 };
 
 /**
