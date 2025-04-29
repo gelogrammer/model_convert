@@ -9,12 +9,12 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://10.0.0.44:5001',
+        target: 'http://localhost:5001',
         changeOrigin: true,
         secure: false
       },
       '/socket.io': {
-        target: 'http://10.0.0.44:5001',
+        target: 'http://localhost:5001',
         ws: true
       }
     }
