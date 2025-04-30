@@ -5,6 +5,9 @@ import CssBaseline from '@mui/material/CssBaseline'
 import './index.css'
 import App from './App.tsx'
 
+// Ensure Supabase service is initialized
+import './services/supabaseService'
+
 // Create a theme
 const theme = createTheme({
   palette: {

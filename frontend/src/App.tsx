@@ -6,7 +6,9 @@ import SpeechTempoDisplay from './components/SpeechRateDisplay';
 import Feedback from './components/Feedback';
 import SpeechCharacteristics from './components/SpeechCharacteristics';
 import EmotionCalibration from './components/EmotionCalibration';
+import Recordings from './components/Recordings';
 import { initializeWebSocket, closeWebSocket } from './services/websocket';
+import { saveRecordingToDatabase } from './services/recordingsService';
 import './App.css';
 
 // Create a theme
@@ -211,6 +213,7 @@ function App() {
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [showReconnecting, setShowReconnecting] = useState(false);
   const [processingPacket, setProcessingPacket] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState<boolean | null>(null);
   const processingTimeoutRef = useRef<number | null>(null);
   
   // Speech detection timeout
@@ -344,15 +347,139 @@ function App() {
   }, [emotionResult]);
 
   // Handle start/stop capturing
-  const toggleCapturing = () => {
+  const toggleCapturing = async () => {
     if (isCapturing) {
       setIsSpeaking(false);
       if (speechTimeoutRef.current) {
         window.clearTimeout(speechTimeoutRef.current);
         speechTimeoutRef.current = null;
       }
+      
+      // Stop the audio capture to finalize recording
+      try {
+        // Import needed functions
+        const { stopAudioCapture, getRecordedAudio, cleanupAudio } = await import('./services/audioService');
+        
+        setLoading(true);
+        // Wait for the stopAudioCapture to complete
+        await stopAudioCapture();
+        
+        // Small delay to make sure recording is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Get the recorded audio and make sure it's available
+        const audioBlob = getRecordedAudio();
+        if (!audioBlob) {
+          console.error('Failed to get recorded audio');
+          setSaveSuccess(false);
+          setTimeout(() => setSaveSuccess(null), 5000);
+          cleanupAudio(); // Clean up audio resources
+          setIsCapturing(false);
+          setLoading(false);
+          return;
+        }
+        
+        console.log('Successfully retrieved audio recording, size:', audioBlob.size);
+        
+        // Save the recording
+        try {
+          await saveRecording();
+        } catch (error) {
+          console.error('Error saving recording:', error);
+          setSaveSuccess(false);
+          setTimeout(() => setSaveSuccess(null), 5000);
+        } finally {
+          cleanupAudio(); // Clean up audio resources
+          setLoading(false);
+          setIsCapturing(false);
+        }
+      } catch (error) {
+        console.error('Error finalizing recording:', error);
+        setSaveSuccess(false);
+        setTimeout(() => setSaveSuccess(null), 5000);
+        
+        // Attempt to clean up resources even if there was an error
+        try {
+          const { cleanupAudio } = await import('./services/audioService');
+          cleanupAudio();
+        } catch (cleanupError) {
+          console.error('Error during cleanup:', cleanupError);
+        }
+        
+        setLoading(false);
+        setIsCapturing(false);
+      }
+    } else {
+      // Starting capture
+      try {
+        // Import needed functions and initialize audio
+        const { startAudioCapture, initializeAudioCapture } = await import('./services/audioService');
+        
+        setLoading(true); // Show loading state while initializing
+        
+        // Initialize audio context first
+        console.log('Initializing audio context...');
+        const initialized = await initializeAudioCapture();
+        if (!initialized) {
+          console.error('Failed to initialize audio context');
+          setError('Failed to initialize audio. Please check microphone permissions and try again.');
+          setLoading(false);
+          return;
+        }
+        
+        // Start audio capture
+        const started = await startAudioCapture();
+        if (!started) {
+          console.error('Failed to start audio capture');
+          setError('Failed to start audio capture. Please check microphone permissions and try again.');
+          setLoading(false);
+          return;
+        }
+        
+        setLoading(false);
+        setIsCapturing(true);
+      } catch (error) {
+        console.error('Error starting audio capture:', error);
+        setError('An error occurred while starting audio capture: ' + (error instanceof Error ? error.message : String(error)));
+        setLoading(false);
+      }
     }
-    setIsCapturing(!isCapturing);
+  };
+
+  // Handle saving the recording
+  const saveRecording = async () => {
+    // Only save if we have emotion data
+    if (!emotionResult) {
+      console.warn('No emotion data available for recording');
+      setSaveSuccess(false);
+      setTimeout(() => setSaveSuccess(null), 5000);
+      return;
+    }
+    
+    try {
+      console.log('Saving recording with emotion data:', emotionResult);
+      // Save recording to database using API
+      const success = await saveRecordingToDatabase(emotionResult);
+      
+      if (success) {
+        console.log('Recording saved successfully');
+        setSaveSuccess(true);
+        // Clear success message after 5 seconds
+        setTimeout(() => setSaveSuccess(null), 5000);
+      } else {
+        console.error('Failed to save recording - API returned false');
+        setSaveSuccess(false);
+        // Clear error message after 5 seconds
+        setTimeout(() => setSaveSuccess(null), 5000);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error saving recording:', error);
+      console.error('Error details:', errorMessage);
+      setSaveSuccess(false);
+      // Clear error message after 5 seconds
+      setTimeout(() => setSaveSuccess(null), 5000);
+    }
   };
 
   // Format last update time
@@ -536,6 +663,30 @@ function App() {
           </Alert>
         </Snackbar>
 
+        {/* Recording saved notification */}
+        <Snackbar 
+          open={saveSuccess !== null} 
+          autoHideDuration={5000}
+          onClose={() => setSaveSuccess(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert 
+            severity={saveSuccess ? "success" : "error"} 
+            sx={{ 
+              width: '100%', 
+              borderRadius: theme.shape.borderRadius,
+              backgroundColor: alpha(saveSuccess ? theme.palette.success.main : theme.palette.error.main, 0.15),
+              color: saveSuccess ? theme.palette.success.main : theme.palette.error.main,
+              border: `1px solid ${alpha(saveSuccess ? theme.palette.success.main : theme.palette.error.main, 0.3)}`
+            }}
+          >
+            {saveSuccess 
+              ? 'Recording saved successfully!' 
+              : 'Failed to save recording. Please try again.'
+            }
+          </Alert>
+        </Snackbar>
+
         <Container maxWidth="lg" sx={{ pt: 12, pb: 6 }}>
           {loading ? (
             <Box sx={{ 
@@ -669,6 +820,10 @@ function App() {
                     isCapturing={isCapturing}
                   />
                 </Box>
+              </Box>
+              
+              <Box sx={{ mb: 4 }}>
+                <Recordings isCapturing={isCapturing} />
               </Box>
             </>
           )}

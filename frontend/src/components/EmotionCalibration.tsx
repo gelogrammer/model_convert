@@ -35,11 +35,13 @@ interface EmotionResult {
 interface EmotionCalibrationProps {
   emotionResult: EmotionResult | null;
   isCapturing: boolean;
+  onCalibrationUpdate?: (calibrationData: any[]) => void;
 }
 
 const EmotionCalibration: React.FC<EmotionCalibrationProps> = ({ 
   emotionResult, 
   isCapturing,
+  onCalibrationUpdate = () => {},
 }) => {
   // Settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -53,7 +55,11 @@ const EmotionCalibration: React.FC<EmotionCalibrationProps> = ({
   // Save thresholds whenever they change
   useEffect(() => {
     saveConfidenceThresholds(confidenceThresholds);
-  }, [confidenceThresholds]);
+    // Notify parent component about calibration update
+    if (onCalibrationUpdate) {
+      onCalibrationUpdate([]);
+    }
+  }, [confidenceThresholds, onCalibrationUpdate]);
 
   // Handle threshold adjustments
   const handleThresholdChange = (emotion: string, newValue: number) => {

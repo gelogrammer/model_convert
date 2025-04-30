@@ -17,6 +17,12 @@ const SEND_INTERVAL = 200; // Send every 200ms to reduce server load
 let audioChunks: Float32Array[] = [];
 const MAX_CHUNKS = 5; // Limit the number of chunks to avoid memory issues
 
+// Audio recording variables
+let mediaRecorder: MediaRecorder | null = null;
+let recordedChunks: Blob[] = [];
+let isRecording = false;
+let lastRecordedBlob: Blob | null = null;  // Store the last recorded blob for retrieval
+
 /**
  * Initialize audio capture
  */
@@ -102,33 +108,155 @@ export const initializeAudioCapture = async (): Promise<boolean> => {
 /**
  * Start audio capture
  */
-export const startAudioCapture = () => {
+export const startAudioCapture = async (): Promise<boolean> => {
+  console.log('startAudioCapture called');
+  
+  // Check if audio context is initialized, if not try to initialize it
   if (!audioContext) {
+    console.log('Audio context not initialized, attempting to initialize...');
+    const initialized = await initializeAudioCapture();
+    if (!initialized) {
+      console.error('Failed to initialize audio context');
+      return false;
+    }
+  }
+
+  if (!audioContext) {
+    console.error('Audio context still not initialized after initialization attempt');
     return false;
   }
 
   // Resume audio context if suspended
   if (audioContext.state === 'suspended') {
-    audioContext.resume();
+    try {
+      await audioContext.resume();
+      console.log('Audio context resumed from suspended state');
+    } catch (resumeError) {
+      console.error('Error resuming audio context:', resumeError);
+      return false;
+    }
   }
   
   // Reset tracking variables
   lastSendTime = 0;
   audioChunks = [];
+  recordedChunks = []; // Clear previous recording chunks
+  lastRecordedBlob = null; // Clear previous recording
 
-  return true;
-};
+  // Start recording
+  if (mediaStream) {
+    try {
+      console.log('Starting MediaRecorder with stream:', mediaStream.id);
+      mediaRecorder = new MediaRecorder(mediaStream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      
+      mediaRecorder.ondataavailable = (event) => {
+        console.log('MediaRecorder data available, size:', event.data.size);
+        if (event.data.size > 0) {
+          recordedChunks.push(event.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        console.log('MediaRecorder stopped, creating recording blob');
+        if (recordedChunks.length > 0) {
+          lastRecordedBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+          console.log('Recording finished, blob created with size:', lastRecordedBlob.size);
+        } else {
+          console.warn('MediaRecorder stopped but no chunks were recorded');
+        }
+      };
+      
+      // Set a dataavailable event every 1 second to ensure we get data even if stop() is called unexpectedly
+      mediaRecorder.start(1000);
+      isRecording = true;
+      console.log('MediaRecorder started successfully');
+      return true;
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      return false;
+    }
+  } else {
+    console.error('No media stream available');
+    return false;
+  }
+}
 
 /**
  * Stop audio capture
  */
-export const stopAudioCapture = () => {
+export const stopAudioCapture = async () => {
+  console.log('stopAudioCapture called');
+  
   if (audioContext) {
     audioContext.suspend();
   }
   
   // Clear audio chunks
   audioChunks = [];
+
+  // Stop recording
+  if (mediaRecorder && isRecording) {
+    try {
+      console.log('Stopping MediaRecorder...');
+      const recorder = mediaRecorder; // Store reference to avoid null check issues
+      
+      // Return a promise that resolves when the recording is ready
+      return new Promise<void>((resolve) => {
+        // Set up onstop handler before calling stop
+        const originalOnStop = recorder.onstop;
+        recorder.onstop = (event: Event) => {
+          console.log('MediaRecorder stopped, creating recording blob');
+          if (recordedChunks.length > 0) {
+            lastRecordedBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+            console.log('Recording finished, blob created with size:', lastRecordedBlob.size);
+          } else {
+            console.warn('MediaRecorder stopped but no chunks were recorded');
+          }
+          
+          // Call original handler if it exists
+          if (originalOnStop) {
+            originalOnStop.call(recorder, event);
+          }
+          
+          isRecording = false;
+          resolve();
+        };
+        
+        // Add a final dataavailable event handler to make sure we get the last bit of audio
+        const dataHandler = (event: BlobEvent) => {
+          console.log('Final data available event, size:', event.data.size);
+          if (event.data.size > 0) {
+            recordedChunks.push(event.data);
+          }
+          recorder.removeEventListener('dataavailable', dataHandler);
+        };
+        
+        recorder.addEventListener('dataavailable', dataHandler);
+        
+        // Request all remaining data
+        recorder.requestData();
+        
+        // Stop the recorder after a brief delay to ensure data is captured
+        setTimeout(() => {
+          try {
+            recorder.stop();
+          } catch (err) {
+            console.error('Error stopping MediaRecorder:', err);
+            isRecording = false;
+            resolve();
+          }
+        }, 100);
+      });
+    } catch (error) {
+      console.error('Error stopping MediaRecorder:', error);
+      isRecording = false;
+    }
+  } else {
+    console.log('No active MediaRecorder to stop');
+    return Promise.resolve();
+  }
 };
 
 /**
@@ -151,6 +279,11 @@ export const cleanupAudio = () => {
     audioSourceNode = null;
   }
 
+  if (mediaRecorder && isRecording) {
+    mediaRecorder.stop();
+    isRecording = false;
+  }
+
   if (mediaStream) {
     mediaStream.getTracks().forEach(track => track.stop());
     mediaStream = null;
@@ -163,6 +296,7 @@ export const cleanupAudio = () => {
   
   // Clear audio chunks
   audioChunks = [];
+  recordedChunks = [];
 };
 
 /**
@@ -350,4 +484,43 @@ export const getAudioVisualizationData = (): Uint8Array | null => {
   analyser.getByteFrequencyData(dataArray);
   
   return dataArray;
+};
+
+/**
+ * Get recorded audio as blob
+ */
+export const getRecordedAudio = (): Blob | null => {
+  console.log('getRecordedAudio called');
+  
+  // If we have a lastRecordedBlob, use it
+  if (lastRecordedBlob && lastRecordedBlob.size > 0) {
+    console.log('Returning cached recording blob, size:', lastRecordedBlob.size);
+    return lastRecordedBlob;
+  }
+  
+  // Otherwise, create a new one if we have chunks
+  if (recordedChunks.length > 0) {
+    console.log('Creating new blob from', recordedChunks.length, 'chunks');
+    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+    lastRecordedBlob = blob; // Cache for future calls
+    console.log('Created and cached new blob, size:', blob.size);
+    return blob;
+  }
+  
+  console.warn('No recorded audio available');
+  return null;
+};
+
+/**
+ * Check if currently recording
+ */
+export const isCurrentlyRecording = (): boolean => {
+  return isRecording;
+};
+
+/**
+ * Clear recorded audio chunks
+ */
+export const clearRecordedAudio = (): void => {
+  recordedChunks = [];
 };

@@ -1,0 +1,34 @@
+SpeechSense AI - Database Setup Instructions
+=============================================
+
+To fix the recording saving and fetching issues, please complete these steps:
+
+1. Copy the entire contents of the SQL file:
+   - Open the file: direct_create_recordings.sql
+   - Select all (Ctrl+A) and copy (Ctrl+C)
+
+2. Go to Supabase SQL Editor:
+   - URL: https://pztstrmccavxrgccvmjq.supabase.co/project/sql
+   - Login if necessary
+
+3. Create a new SQL query:
+   - Click the "+ New Query" button
+   - Paste the SQL content (Ctrl+V) into the editor
+
+4. Execute the SQL:
+   - Click the "Run" button
+   - Wait for the query to complete (it should show success notices)
+
+5. Restart the SpeechSense AI application:
+   - Close and reopen the application
+   - Try recording and saving again
+
+If you still encounter issues:
+- Check the browser console for specific error messages (F12 in most browsers)
+- Verify your internet connection is stable
+- Make sure your Supabase credentials in the .env file are correct
+
+The SQL creates:
+- A recordings table with required columns and permissions
+- A storage bucket for the audio files
+- All necessary security policies for anonymous and authenticated users 
