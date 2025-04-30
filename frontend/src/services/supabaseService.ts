@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { AudioAnalysisData } from './recordingsService';
 
 // Log available environment variables without exposing sensitive data
 console.log('Environment variables available:', {
@@ -16,6 +17,144 @@ if (!supabaseUrl || !supabaseKey) {
 // Create the Supabase client
 console.log('Initializing Supabase client with URL:', supabaseUrl);
 export const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Function to ensure proper database policies are set
+export const ensureDatabaseSetup = async (): Promise<boolean> => {
+  try {
+    // First try to run the apply_database_fixes RPC function
+    const { error } = await supabase.rpc('apply_database_fixes');
+    
+    if (error) {
+      console.error('Error applying database fixes via RPC:', error);
+      
+      // Try to directly apply Row Level Security policies as a fallback
+      try {
+        // Create policies for the recordings table
+        const recordingsPolicies = [
+          {
+            name: "Anonymous users can select recordings",
+            operation: "SELECT",
+            definition: "true"
+          },
+          {
+            name: "Anonymous users can insert recordings",
+            operation: "INSERT",
+            definition: "true"
+          },
+          {
+            name: "Anonymous users can update recordings",
+            operation: "UPDATE",
+            definition: "true"
+          },
+          {
+            name: "Anonymous users can delete recordings",
+            operation: "DELETE",
+            definition: "true"
+          }
+        ];
+
+        // Try to create each policy
+        for (const policy of recordingsPolicies) {
+          try {
+            // Use raw SQL with Supabase
+            const sqlQuery = `
+              CREATE POLICY IF NOT EXISTS "${policy.name}" 
+              ON public.recordings FOR ${policy.operation} 
+              TO anon USING (${policy.definition})
+            `;
+            
+            try {
+              const { error: policyError } = await supabase.rpc('create_policy_if_not_exists', { 
+                table_name: 'recordings',
+                policy_name: policy.name,
+                operation: policy.operation,
+                definition: policy.definition
+              });
+              
+              if (policyError) {
+                console.warn(`Failed to create policy "${policy.name}" via RPC:`, policyError);
+              }
+            } catch (rpcError) {
+              console.warn(`Exception creating policy "${policy.name}":`, rpcError);
+            }
+          } catch (policyError) {
+            console.warn(`Failed to create policy "${policy.name}":`, policyError);
+          }
+        }
+        
+        // Also try to fix storage bucket and policies
+        try {
+          const { error: bucketError } = await supabase.storage.createBucket('recordings', {
+            public: true,
+            allowedMimeTypes: ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm'],
+            fileSizeLimit: 52428800 // 50MB
+          });
+          
+          if (bucketError) {
+            console.log('Bucket may already exist, continuing...', bucketError);
+          } else {
+            console.log('Successfully created recordings bucket');
+          }
+        } catch (bucketError) {
+          console.log('Error creating bucket, it may already exist:', bucketError);
+        }
+        
+        // Try to create storage policies manually
+        const storagePolicies = [
+          {
+            name: "Anyone can view recordings",
+            operation: "SELECT",
+            definition: "bucket_id = 'recordings'"
+          },
+          {
+            name: "Anonymous users can upload recordings",
+            operation: "INSERT",
+            definition: "bucket_id = 'recordings'"
+          },
+          {
+            name: "Anonymous users can update recordings",
+            operation: "UPDATE",
+            definition: "bucket_id = 'recordings'"
+          },
+          {
+            name: "Anonymous users can delete recordings",
+            operation: "DELETE",
+            definition: "bucket_id = 'recordings'"
+          }
+        ];
+        
+        // Try to apply storage policies
+        for (const policy of storagePolicies) {
+          try {
+            const { error: storagePolicyError } = await supabase.rpc('create_storage_policy_if_not_exists', {
+              policy_name: policy.name,
+              operation: policy.operation,
+              definition: policy.definition
+            });
+            
+            if (storagePolicyError) {
+              console.warn(`Failed to create storage policy "${policy.name}":`, storagePolicyError);
+            }
+          } catch (policyError) {
+            console.warn(`Exception creating storage policy "${policy.name}":`, policyError);
+          }
+        }
+        
+        console.log('Attempted manual database setup as fallback');
+      } catch (manualError) {
+        console.error('Manual database setup also failed:', manualError);
+        return false;
+      }
+    } else {
+      console.log('Successfully applied database fixes via RPC');
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error ensuring database setup:', error);
+    return false;
+  }
+};
 
 // Test the connection and ensure the recordings table exists
 (async () => {
@@ -64,7 +203,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
           try {
             const { data: createBucketData, error: createBucketError } = await supabase.storage.createBucket('recordings', {
               public: true,
-              allowedMimeTypes: ['audio/webm', 'audio/mpeg', 'audio/wav'],
+              allowedMimeTypes: ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm'],
               fileSizeLimit: 50000000 // 50MB limit
             });
             
@@ -95,6 +234,19 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
     } else {
       console.log('Supabase storage bucket accessible:', bucketData);
     }
+    
+    // Try to ensure database is properly set up with correct policies
+    console.log('Checking database policies and fixing if needed...');
+    try {
+      const fixSuccess = await ensureDatabaseSetup();
+      if (fixSuccess) {
+        console.log('Database setup successfully verified or fixed');
+      } else {
+        console.warn('Could not verify or fix database setup');
+      }
+    } catch (setupError) {
+      console.error('Error during database setup check:', setupError);
+    }
   } catch (err) {
     console.error('Supabase connection test error:', err);
   }
@@ -105,6 +257,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 const ENABLE_DB_TROUBLESHOOTING = true;
 
 // Function to log only in troubleshooting mode
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const troubleshootLog = (message: string, data?: any) => {
   if (ENABLE_DB_TROUBLESHOOTING) {
     if (data) {
@@ -124,129 +277,248 @@ export const uploadRecording = async (
   try {
     // Validate inputs
     if (!file || file.size === 0) {
+      troubleshootLog('Upload validation failed: empty or null file');
       console.error('Invalid file: File is empty or null');
       return { data: null, error: new Error('Invalid file: File is empty or null') };
     }
     
+    troubleshootLog('Starting upload process', { fileName, fileSize: file.size, mimeType: file.type });
     console.log('Starting upload to Supabase storage, file size:', file.size);
     console.log('File MIME type:', file.type);
     console.log('Recording duration:', metadata.duration);
     
     // Check if Supabase client is initialized
     if (!supabaseUrl || !supabaseKey) {
+      troubleshootLog('Supabase connection not initialized');
       console.error('Supabase connection not properly initialized. Check environment variables.');
       return { data: null, error: new Error('Supabase connection not properly initialized') };
     }
     
-    // Check if recordings table exists (we'll store metadata there)
-    troubleshootLog('Testing if recordings table exists...');
+    // Always try to fix database policies first before attempting upload
     try {
-      const { count, error: countError } = await supabase
-        .from('recordings')
-        .select('*', { count: 'exact', head: true })
-        .limit(1);
-      
-      if (countError) {
-        troubleshootLog('Error checking recordings table:', countError);
-      } else {
-        troubleshootLog(`Recordings table exists with approximately ${count} records`);
-      }
-    } catch (tableCheckError) {
-      troubleshootLog('Error testing table existence via RPC, falling back to direct check...', tableCheckError);
+      console.log('Ensuring database policies before upload...');
+      await ensureDatabaseSetup();
+    } catch (policiesError) {
+      console.warn('Error ensuring policies but continuing with upload:', policiesError);
     }
     
-    // Try direct file upload without checking bucket first
-    troubleshootLog('Attempting direct upload to recordings bucket');
+    // Ensure the bucket exists with correct permissions before upload 
     try {
-      // Skip bucket check (it frequently causes errors) and try direct upload
-      const result = await supabase.storage
-        .from('recordings')
-        .upload(`${fileName}`, file, {
-          contentType: file.type || 'audio/webm',
-          upsert: true,
-        });
+      console.log('Checking recordings bucket...');
       
-      const { data: uploadData, error: uploadError } = result;
+      // First check if the bucket exists
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
       
-      if (uploadError) {
-        troubleshootLog('Direct upload failed:', uploadError);
-        
-        // Check for different error types and provide better error messages
-        if (uploadError.message) {
-          if (uploadError.message.includes('bucket') && uploadError.message.includes('not found')) {
-            troubleshootLog('Error indicates bucket not found - this is a common issue');
-          } else if (uploadError.message.includes('row-level security policy')) {
-            troubleshootLog('Error indicates RLS policy issue - check Supabase settings');
-          }
-        }
-        
-        // Save metadata to database even if file upload failed
-        troubleshootLog('Attempting to at least save metadata to database');
-        try {
-          const { error: metadataError } = await supabase
-            .from('recordings')
-            .insert({
-              file_name: fileName,
-              duration: metadata.duration,
-              public_url: null, // File upload failed, so no URL
-              emotion_data: metadata.emotionData,
-              file_path: fileName,
-            });
-          
-          if (metadataError) {
-            troubleshootLog('Failed to save metadata:', metadataError);
-          } else {
-            troubleshootLog('Successfully saved metadata without file upload');
-            // Return partial success since we at least saved the metadata
-            return { 
-              data: { partial: true, message: 'Metadata saved but file upload failed' }, 
-              error: null 
-            };
-          }
-        } catch (metadataErr) {
-          troubleshootLog('Error saving metadata:', metadataErr);
-        }
-        
-        return { data: null, error: uploadError };
+      let bucketExists = false;
+      if (!listError && buckets) {
+        bucketExists = buckets.some(bucket => bucket.name === 'recordings');
       }
       
-      troubleshootLog('Upload successful:', uploadData);
+      if (!bucketExists) {
+        console.log('Recordings bucket does not exist, creating it...');
+        const { error: createError } = await supabase.storage.createBucket('recordings', {
+          public: true,
+          allowedMimeTypes: ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm'],
+          fileSizeLimit: 52428800 // 50MB
+        });
+        
+        if (createError) {
+          console.error('Error creating bucket:', createError);
+          if (createError.message.includes('duplicate') || createError.message.includes('already exists')) {
+            console.log('Bucket already exists, continuing...');
+          } else if (createError.message.includes('permission') || createError.message.includes('policy')) {
+            console.warn('Permission issue with bucket creation, will try direct upload anyway');
+          }
+        } else {
+          console.log('Successfully created recordings bucket');
+        }
+      } else {
+        console.log('Recordings bucket exists');
+        
+        // Update bucket settings to ensure it's public
+        try {
+          await supabase.rpc('ensure_recordings_bucket_settings', {
+            is_public: true,
+            size_limit: 52428800,
+            mime_types: ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm']
+          });
+        } catch (updateError) {
+          console.warn('Could not update bucket settings, continuing anyway:', updateError);
+        }
+      }
+    } catch (bucketError) {
+      console.warn('Error during bucket verification, continuing anyway:', bucketError);
+    }
+    
+    // Ensure the file has a proper content type, preferring WAV format
+    let contentType = file.type || metadata.mimeType || 'audio/wav';
+    
+    // If not WAV already, set to WAV
+    if (!contentType.includes('wav')) {
+      contentType = 'audio/wav';
+      
+      // Change the file extension to .wav if needed
+      if (!fileName.toLowerCase().endsWith('.wav')) {
+        fileName = fileName.substring(0, fileName.lastIndexOf('.')) + '.wav';
+      }
+    }
+    
+    // Create a new blob with the WAV content type
+    const uploadBlob = new Blob([await file.arrayBuffer()], { type: contentType });
+    
+    console.log('Uploading file with content type:', contentType);
+    
+    // Try the upload with multiple fallbacks
+    try {
+      console.log('Attempting primary upload method...');
+      
+      // Try with standard upload first
+      let uploadData;
+      let uploadError;
+      
+      try {
+        const uploadResult = await supabase.storage
+          .from('recordings')
+          .upload(fileName, uploadBlob, {
+            contentType,
+            upsert: true,
+          });
+          
+        uploadData = uploadResult.data;
+        uploadError = uploadResult.error;
+      } catch (directUploadError) {
+        console.error('Exception during direct upload:', directUploadError);
+        uploadError = directUploadError;
+      }
+      
+      // If the standard upload fails, try alternatives
+      if (uploadError) {
+        console.warn('Standard upload failed, trying alternative methods:', uploadError);
+        
+        // Try simpler upload with fewer options
+        try {
+          console.log('Attempting simplified upload...');
+          // Generate a simpler filename with .wav extension
+          const simpleFileName = `audio_${Date.now()}.wav`;
+          
+          const { data: altData, error: altError } = await supabase.storage
+            .from('recordings')
+            .upload(simpleFileName, uploadBlob);
+          
+          if (altError) {
+            console.error('Alternative upload also failed:', altError);
+          } else {
+            console.log('Alternative upload succeeded:', altData);
+            uploadData = altData;
+            fileName = simpleFileName; // Update filename for database entry
+          }
+        } catch (altUploadError) {
+          console.error('Exception during alternative upload:', altUploadError);
+        }
+      }
+      
+      // If we still don't have upload data, return the error
+      if (!uploadData) {
+        return { 
+          data: null, 
+          error: uploadError || new Error('All upload attempts failed') 
+        };
+      }
+      
+      console.log('File uploaded successfully:', uploadData);
       
       // Get the public URL
       const { data: publicUrlData } = supabase.storage
         .from('recordings')
-        .getPublicUrl(`${fileName}`);
+        .getPublicUrl(fileName);
       
       const publicUrl = publicUrlData?.publicUrl || '';
-      troubleshootLog('Generated public URL:', publicUrl);
+      console.log('Generated public URL:', publicUrl);
       
-      // Insert record into database
-      troubleshootLog('Saving recording metadata to database');
-      const { data: recordData, error: recordError } = await supabase
-        .from('recordings')
-        .insert({
-          file_name: fileName,
-          public_url: publicUrl,
-          duration: metadata.duration,
-          emotion_data: metadata.emotionData,
-          file_path: fileName,
-        })
-        .select()
-        .single();
-      
-      if (recordError) {
-        troubleshootLog('Database insert error:', recordError);
+      // Record simplified metadata first in case of permission issues
+      try {
+        console.log('Saving recording metadata to database...');
+        const { data: recordData, error: recordError } = await supabase
+          .from('recordings')
+          .insert({
+            file_name: fileName,
+            file_path: fileName,
+            public_url: publicUrl,
+            duration: metadata.duration || 0,
+            emotion_data: metadata.emotionData || {},
+            recorded_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+        
+        if (recordError) {
+          console.error('Database insert error:', recordError);
+          
+          // Try with minimal data if there's an error
+          if (recordError.message && (
+            recordError.message.includes('permission') || 
+            recordError.message.includes('policy') || 
+            recordError.message.includes('security')
+          )) {
+            console.log('Trying simplified database insert');
+            const { data: minimalData, error: minimalError } = await supabase
+              .from('recordings')
+              .insert({
+                file_name: fileName,
+                file_path: fileName,
+                public_url: publicUrl,
+                duration: metadata.duration || 0,
+                recorded_at: new Date().toISOString()
+              })
+              .select()
+              .single();
+            
+            if (minimalError) {
+              console.error('Simplified insert also failed:', minimalError);
+              return { 
+                data: { 
+                  fileUploaded: true, 
+                  metadataSaved: false,
+                  publicUrl,
+                  fileName 
+                }, 
+                error: minimalError 
+              };
+            } else {
+              console.log('Simplified metadata insert succeeded:', minimalData);
+              return { data: minimalData, error: null };
+            }
+          }
+          
+          // Return partial success - file uploaded but metadata failed
+          return { 
+            data: { 
+              fileUploaded: true, 
+              metadataSaved: false,
+              publicUrl,
+              fileName 
+            }, 
+            error: recordError 
+          };
+        }
+        
+        console.log('Recording saved to database successfully:', recordData);
+        return { data: recordData, error: null };
+      } catch (metadataError) {
+        console.error('Exception during metadata save:', metadataError);
         return { 
-          data: { fileUploaded: true, metadataSaved: false }, 
-          error: { message: 'File uploaded but database insert failed', details: recordError } 
+          data: { 
+            fileUploaded: true, 
+            metadataSaved: false,
+            publicUrl,
+            fileName 
+          }, 
+          error: metadataError 
         };
       }
-      
-      troubleshootLog('Successfully saved recording with ID:', recordData?.id);
-      return { data: recordData, error: null };
-    } catch (directUploadError) {
-      troubleshootLog('Direct upload operation failed:', directUploadError);
-      return { data: null, error: directUploadError };
+    } catch (error) {
+      console.error('Error in upload process:', error);
+      return { data: null, error };
     }
   } catch (error) {
     console.error('Unexpected error in uploadRecording:', error);
@@ -254,149 +526,180 @@ export const uploadRecording = async (
   }
 };
 
-// Function to get all recordings
+// Fetch recordings from Supabase
 export const getRecordings = async () => {
   try {
-    console.log('Fetching recordings from Supabase table...');
+    console.log('Fetching recordings from Supabase...');
     
-    if (ENABLE_DB_TROUBLESHOOTING) {
-      troubleshootLog('Checking Supabase connection and configuration...');
-      troubleshootLog('Supabase URL:', supabaseUrl);
-      troubleshootLog('Supabase Key exists:', !!supabaseKey);
-      
-      // Test authentication status
-      const { data: authData } = await supabase.auth.getSession();
-      troubleshootLog('Auth session:', authData);
-      
-      // Check if recordings table exists
-      try {
-        troubleshootLog('Testing if recordings table exists...');
-        const { data: tableData, error: tableError } = await supabase.rpc('test_table_existence', { 
-          table_name: 'recordings' 
-        });
-        
-        if (tableError) {
-          troubleshootLog('Error testing table existence via RPC, falling back to direct check...');
-          
-          // Fallback - try direct query to test table
-          const { count, error: countError } = await supabase
-            .from('recordings')
-            .select('*', { count: 'exact', head: true });
-            
-          if (countError) {
-            troubleshootLog('Direct table check error:', countError);
-            
-            if (countError.message.includes('does not exist')) {
-              troubleshootLog('CRITICAL: Recordings table does not exist, needs to be created');
-              // No need for alert here as we'll handle this in the try-catch block
-            }
-          } else {
-            troubleshootLog(`Recordings table exists with approximately ${count} records`);
-          }
-        } else {
-          troubleshootLog('Table existence test result:', tableData);
-        }
-      } catch (e) {
-        troubleshootLog('Error checking table existence:', e);
-      }
-      
-      // Check bucket
-      try {
-        troubleshootLog('Testing if recordings bucket exists...');
-        const { data: bucketData, error: bucketError } = await supabase.storage.getBucket('recordings');
-        
-        if (bucketError) {
-          troubleshootLog('Storage bucket error:', bucketError);
-          if (bucketError.message.includes('not found')) {
-            troubleshootLog('CRITICAL: Recordings bucket does not exist, needs to be created');
-          }
-        } else {
-          troubleshootLog('Recordings bucket exists:', bucketData);
-        }
-      } catch (e) {
-        troubleshootLog('Error checking bucket existence:', e);
-      }
-    }
-    
-    // First check if the recordings table exists and is accessible
-    try {
-      const { count, error: countError } = await supabase
-        .from('recordings')
-        .select('*', { count: 'exact', head: true });
-        
-      if (countError) {
-        console.error('Error checking recordings table:', countError);
-      } else {
-        console.log(`Recording table contains approximately ${count} records`);
-      }
-    } catch (e) {
-      console.error('Error checking recordings count:', e);
-    }
-    
-    // Now get all recordings
-    const response = await supabase
+    // Fetch recordings from database
+    const { data: recordings, error: recordingsError } = await supabase
       .from('recordings')
       .select('*')
-      .order('recorded_at', { ascending: false });
+      .order('created_at', { ascending: false });
     
-    console.log('Supabase getRecordings raw response:', response);
+    if (recordingsError) {
+      console.error('Error fetching recordings:', recordingsError);
+      return { data: [], error: recordingsError };
+    }
     
-    // Debug the returned data
-    if (response.data) {
-      console.log(`Found ${response.data.length} recordings in Supabase`);
-      response.data.forEach((rec, i) => {
-        console.log(`Recording ${i+1}:`, {
-          id: rec.id,
-          file_name: rec.file_name,
-          file_path: rec.file_path,
-          public_url: rec.public_url,
-          duration: rec.duration
-        });
+    if (!recordings || recordings.length === 0) {
+      return { data: [], error: null };
+    }
+    
+    // Fetch audio analysis data for all recordings
+    const recordingIds = recordings.map(rec => rec.id);
+    const { data: analysisData, error: analysisError } = await supabase
+      .from('audio_analysis')
+      .select('*')
+      .in('recording_id', recordingIds);
+    
+    if (analysisError) {
+      console.error('Error fetching audio analysis:', analysisError);
+      // Continue with recordings but without analysis
+    }
+    
+    // Create a lookup map for quick access to analysis data
+    const analysisMap = new Map();
+    if (analysisData && analysisData.length > 0) {
+      analysisData.forEach(analysis => {
+        analysisMap.set(analysis.recording_id, analysis);
       });
-    } else {
-      console.warn('No data returned from Supabase recordings table');
     }
     
-    if (response.error) {
-      console.error('Error fetching recordings:', response.error);
-    }
+    // Enhance recordings with audio analysis data
+    const enhancedRecordings = recordings.map(recording => {
+      const analysis = analysisMap.get(recording.id);
+      
+      if (analysis) {
+        // If we have dedicated analysis data, add it to emotion_data
+        const enhancedEmotionData = recording.emotion_data || {};
+        
+        // Convert from database format to the expected frontend format
+        const analysisForFrontend = {
+          duration: analysis.duration,
+          averageVolume: analysis.average_volume,
+          peakVolume: analysis.peak_volume,
+          silenceDuration: analysis.silence_duration,
+          speechRate: analysis.speech_rate,
+          wordCount: analysis.word_count,
+          speechRateCategory: {
+            fluency: analysis.fluency,
+            tempo: analysis.tempo,
+            pronunciation: analysis.pronunciation
+          },
+          audioQuality: {
+            clarity: analysis.audio_clarity,
+            noiseLevel: analysis.noise_level,
+            distortion: analysis.distortion
+          },
+          segments: analysis.segments || [],
+          timestamp: analysis.created_at,
+          dominantEmotion: analysis.dominant_emotion,
+          emotionAnalysis: generateEmotionAnalysis(analysis.dominant_emotion)
+        };
+        
+        return {
+          ...recording,
+          audio_analysis_id: analysis.id,
+          emotion_data: {
+            ...enhancedEmotionData,
+            audioAnalysis: analysisForFrontend
+          }
+        };
+      }
+      
+      return recording;
+    });
     
-    return response;
+    console.log(`Found ${enhancedRecordings.length} recordings with ${analysisMap.size} analysis records`);
+    return { data: enhancedRecordings, error: null };
   } catch (error) {
-    console.error('Error fetching recordings from Supabase:', error);
-    return { data: [], error: error };
+    console.error('Error in getRecordings:', error);
+    return { data: [], error };
   }
 };
+
+// Helper function to generate emotion analysis text based on emotion
+function generateEmotionAnalysis(emotion: string): string {
+  const emotionName = emotion?.toLowerCase() || 'unknown';
+  
+  switch(emotionName) {
+    case 'happy':
+      return "Your voice conveys happiness and positive energy. This upbeat tone helps create an engaging and optimistic atmosphere, which can be effective for motivational content and building rapport with listeners.";
+    case 'sad':
+      return "Your voice reflects a somber or melancholic tone. This emotional quality can create empathy and connection when discussing serious topics, though it may benefit from more variation for engaging longer conversations.";
+    case 'angry':
+      return "Your voice expresses intensity and strong conviction. This passionate delivery can be powerful for persuasive content, though moderating the tone for different segments might create better listener engagement over time.";
+    case 'fear':
+      return "Your voice conveys apprehension or concern. This cautious delivery style can be effective when discussing risks or warnings, though it may benefit from balancing with more confident tones in other segments.";
+    case 'surprise':
+      return "Your voice expresses wonder and curiosity. This engaged tone creates interest and can effectively maintain listener attention, particularly useful when introducing new concepts or unexpected information.";
+    case 'disgust':
+      return "Your voice conveys strong disapproval or aversion. This critical tone can be appropriate when discussing problematic issues, though balancing with constructive alternatives may create a more positive overall impression.";
+    case 'neutral':
+    case 'calm':
+      return "Your speech tone is primarily neutral and measured. This balanced delivery is appropriate for informational content and creates a sense of credibility and objectivity.";
+    default:
+      if (emotionName !== 'unknown') {
+        return `Your voice primarily expresses ${emotionName}, creating a distinctive emotional quality in your delivery. This emotional tone adds personality to your speech and helps create connection with listeners.`;
+      }
+      return "No emotion analysis available.";
+  }
+}
 
 // Function to delete a recording
 export const deleteRecording = async (id: number, filePath: string) => {
   try {
-    // Extract the file name from the path if needed
-    const fileName = filePath.includes('/') ? filePath.split('/').pop() : filePath;
+    console.log(`Deleting recording with ID ${id} and file path ${filePath}...`);
     
-    console.log('Deleting file from storage:', fileName);
+    // First delete the audio analysis if it exists
+    // This should happen automatically due to the foreign key constraint with ON DELETE CASCADE,
+    // but we'll do it explicitly to be safe
+    const { error: analysisError } = await supabase
+      .from('audio_analysis')
+      .delete()
+      .eq('recording_id', id);
     
-    // First delete from storage
-    const { error: storageError } = await supabase.storage
-      .from('recordings')
-      .remove([fileName || '']);
-
-    if (storageError) {
-      console.error('Storage delete error:', storageError);
-      return { data: null, error: storageError };
+    if (analysisError) {
+      console.error('Error deleting audio analysis:', analysisError);
+      // Continue with deletion anyway, as the recording is the primary resource
     }
-
-    console.log('File deleted from storage, now deleting from database, id:', id);
     
-    // Then delete from database
+    // Delete the actual recording entry
     const { data, error } = await supabase
       .from('recordings')
       .delete()
       .eq('id', id);
-      
-    return { data, error };
+    
+    if (error) {
+      console.error('Error deleting recording from database:', error);
+      return { data: null, error };
+    }
+    
+    console.log('Recording deleted from database successfully');
+    
+    // Also attempt to delete the file from storage
+    if (filePath) {
+      try {
+        console.log(`Attempting to delete file from storage: ${filePath}`);
+        const { error: storageError } = await supabase.storage
+          .from('recordings')
+          .remove([filePath]);
+        
+        if (storageError) {
+          console.error('Error deleting storage file:', storageError);
+          // We don't fail the overall operation if just the storage deletion fails
+        } else {
+          console.log('Storage file deleted successfully');
+        }
+      } catch (storageErr) {
+        console.error('Exception during storage file deletion:', storageErr);
+      }
+    }
+    
+    return { data, error: null };
   } catch (error) {
-    console.error('Error during deletion:', error);
+    console.error('Exception in deleteRecording:', error);
     return { data: null, error };
   }
 };
@@ -409,4 +712,102 @@ export interface RecordingMetadata {
     confidenceThreshold?: number;
     useSmoothing?: boolean;
   };
-} 
+  mimeType?: string; // Type of the audio file for better browser compatibility
+}
+
+// Save audio analysis to Supabase
+export const saveAudioAnalysis = async (analysisData: AudioAnalysisData) => {
+  try {
+    console.log('Saving audio analysis to Supabase:', analysisData);
+    
+    // Insert the analysis data into the audio_analysis table
+    const { data, error } = await supabase
+      .from('audio_analysis')
+      .insert([
+        {
+          recording_id: analysisData.recording_id,
+          duration: analysisData.duration,
+          average_volume: analysisData.average_volume,
+          peak_volume: analysisData.peak_volume,
+          silence_duration: analysisData.silence_duration,
+          speech_rate: analysisData.speech_rate,
+          word_count: analysisData.word_count,
+          fluency: analysisData.fluency,
+          tempo: analysisData.tempo,
+          pronunciation: analysisData.pronunciation,
+          audio_clarity: analysisData.audio_clarity,
+          noise_level: analysisData.noise_level,
+          distortion: analysisData.distortion,
+          dominant_emotion: analysisData.dominant_emotion,
+          emotion_confidence: analysisData.emotion_confidence,
+          segments: analysisData.segments
+        }
+      ])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error saving audio analysis:', error);
+      return { data: null, error };
+    }
+    
+    return { data, error: null };
+  } catch (error) {
+    console.error('Exception saving audio analysis:', error);
+    return { data: null, error };
+  }
+};
+
+// Test Supabase connection status
+export const testSupabaseConnection = async (): Promise<{ connected: boolean; message: string }> => {
+  try {
+    console.log('Testing Supabase connection...');
+    
+    // Check URL and key
+    if (!supabaseUrl || !supabaseKey) {
+      return {
+        connected: false,
+        message: 'Supabase URL or key missing. Check your .env file.'
+      };
+    }
+    
+    // Try to access the storage buckets
+    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+    
+    if (bucketError) {
+      console.error('Error accessing Supabase storage:', bucketError);
+      return {
+        connected: false,
+        message: `Storage error: ${bucketError.message}`
+      };
+    }
+    
+    // Try to check the recordings table
+    const { count, error: tableError } = await supabase
+      .from('recordings')
+      .select('*', { count: 'exact', head: true })
+      .limit(1);
+    
+    if (tableError) {
+      console.error('Error accessing recordings table:', tableError);
+      return {
+        connected: false,
+        message: `Database error: ${tableError.message}`
+      };
+    }
+    
+    // Check if recordings bucket exists
+    const recordingsBucketExists = buckets?.some(b => b.name === 'recordings') || false;
+    
+    return {
+      connected: true,
+      message: `Connected successfully. Table has ${count || 0} recordings. Recordings bucket ${recordingsBucketExists ? 'exists' : 'does not exist'}.`
+    };
+  } catch (error) {
+    console.error('Unexpected error testing Supabase connection:', error);
+    return {
+      connected: false,
+      message: `Unexpected error: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+}; 

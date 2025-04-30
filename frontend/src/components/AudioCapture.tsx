@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Typography, Box, Chip } from '@mui/material';
+import { Typography, Box, Chip, Snackbar, Alert, Button } from '@mui/material';
+import SaveIcon from '@mui/icons-material/Save';
 import { initializeAudioCapture, startAudioCapture, stopAudioCapture, cleanupAudio, getAudioVisualizationData, updateAudioSettings } from '../services/audioService';
+import { saveRecordingToDatabase } from '../services/recordingsService';
 
 interface AudioCaptureProps {
   isCapturing: boolean;
@@ -22,6 +24,9 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({
   const [audioLevel, setAudioLevel] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const speakingTimeoutRef = useRef<number | null>(null);
+  const [analysisNotification, setAnalysisNotification] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Initialize audio capture only when connected
   useEffect(() => {
@@ -76,10 +81,16 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({
         startAudioCapture();
         startVisualization();
       } else {
-        stopAudioCapture();
-        stopVisualization();
-        setIsSpeaking(false);
-        setAudioLevel(0);
+        stopAudioCapture().then(() => {
+          stopVisualization();
+          setIsSpeaking(false);
+          setAudioLevel(0);
+          // Show the analysis notification when stopping capture
+          setAnalysisNotification(true);
+          
+          // Auto-save the recording
+          saveRecording();
+        });
       }
     }
   }, [isCapturing, isInitialized]);
@@ -189,6 +200,51 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({
     }
   };
 
+  // Save the recording
+  const saveRecording = async () => {
+    if (isSaving) return;
+    
+    setIsSaving(true);
+    try {
+      console.log('Attempting to save recording...');
+      let attempts = 0;
+      let success = false;
+      const maxAttempts = 3;
+      
+      while (!success && attempts < maxAttempts) {
+        attempts++;
+        try {
+          console.log(`Save attempt ${attempts}/${maxAttempts}`);
+          success = await saveRecordingToDatabase({});
+          
+          if (success) {
+            console.log('Successfully saved recording');
+            break;
+          } else {
+            console.warn(`Save attempt ${attempts} failed, ${maxAttempts - attempts} attempts remaining`);
+            // Wait a short time before retry
+            if (attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+            }
+          }
+        } catch (retryErr) {
+          console.error(`Error during save attempt ${attempts}:`, retryErr);
+          // Continue to next attempt
+        }
+      }
+      
+      if (!success) {
+        console.error(`Failed to save recording after ${maxAttempts} attempts`);
+        setSaveError(true);
+      }
+    } catch (err) {
+      console.error('Error in saveRecording function:', err);
+      setSaveError(true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: { xs: 1, md: 2 } }}>
@@ -292,6 +348,54 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({
           )}
         </>
       )}
+      
+      {!isCapturing && saveError && (
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<SaveIcon />}
+            onClick={saveRecording}
+            disabled={isSaving}
+            sx={{ mt: 2 }}
+          >
+            {isSaving ? 'Saving...' : 'Save Recording'}
+          </Button>
+        </Box>
+      )}
+      
+      {/* Analysis notification */}
+      <Snackbar
+        open={analysisNotification}
+        autoHideDuration={3000}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        onClose={() => setAnalysisNotification(false)}
+      >
+        <Alert 
+          onClose={() => setAnalysisNotification(false)} 
+          severity="info" 
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          Audio analysis complete. Check Recordings to view results.
+        </Alert>
+      </Snackbar>
+      
+      {/* Save Error Notification */}
+      <Snackbar 
+        open={saveError} 
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        autoHideDuration={5000}
+        onClose={() => setSaveError(false)}
+      >
+        <Alert 
+          severity="warning" 
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          Failed to save recording automatically.
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

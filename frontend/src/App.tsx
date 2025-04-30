@@ -501,36 +501,62 @@ function App() {
 
   // Handle saving the recording
   const saveRecording = async () => {
-    // Only save if we have emotion data
-    if (!emotionResult) {
-      console.warn('No emotion data available for recording');
-      setSaveSuccess(false);
-      setTimeout(() => setSaveSuccess(null), 5000);
-      return;
-    }
-    
+    // Import needed functions for audio validation
     try {
-      console.log('Saving recording with emotion data:', emotionResult);
-      // Save recording to database using API
-      const success = await saveRecordingToDatabase(emotionResult);
+      const { getRecordedAudio } = await import('./services/audioService');
       
-      if (success) {
-        console.log('Recording saved successfully (either to Supabase or localStorage)');
-        setSaveSuccess(true);
-        // Clear success message after 5 seconds
+      // First verify we have a valid audio recording
+      const audioBlob = getRecordedAudio();
+      
+      if (!audioBlob) {
+        console.error('No audio blob available for saving');
+        setSaveSuccess(false);
         setTimeout(() => setSaveSuccess(null), 5000);
-      } else {
-        console.error('Failed to save recording - could not save to either Supabase or localStorage');
+        return;
+      }
+      
+      if (audioBlob.size === 0) {
+        console.error('Audio blob is empty (zero bytes)');
+        setSaveSuccess(false);
+        setTimeout(() => setSaveSuccess(null), 5000);
+        return;
+      }
+      
+      console.log('Audio blob verified for saving: size =', audioBlob.size, 'type =', audioBlob.type);
+      
+      // Only save if we have emotion data
+      if (!emotionResult) {
+        console.warn('No emotion data available for recording, using default empty object');
+        // Continue with empty emotion data rather than failing
+      }
+      
+      try {
+        console.log('Saving recording with emotion data:', emotionResult || {});
+        // Save recording to database using API, provide empty object if emotionResult is null
+        const success = await saveRecordingToDatabase(emotionResult || {});
+        
+        if (success) {
+          console.log('Recording saved successfully (either to Supabase or localStorage)');
+          setSaveSuccess(true);
+          // Clear success message after 5 seconds
+          setTimeout(() => setSaveSuccess(null), 5000);
+        } else {
+          console.error('Failed to save recording - could not save to either Supabase or localStorage');
+          setSaveSuccess(false);
+          // Clear error message after 5 seconds
+          setTimeout(() => setSaveSuccess(null), 5000);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error saving recording:', error);
+        console.error('Error details:', errorMessage);
         setSaveSuccess(false);
         // Clear error message after 5 seconds
         setTimeout(() => setSaveSuccess(null), 5000);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Error saving recording:', error);
-      console.error('Error details:', errorMessage);
+      console.error('Error loading audio service modules:', error);
       setSaveSuccess(false);
-      // Clear error message after 5 seconds
       setTimeout(() => setSaveSuccess(null), 5000);
     }
   };
