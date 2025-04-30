@@ -23,6 +23,28 @@ let recordedChunks: Blob[] = [];
 let isRecording = false;
 let lastRecordedBlob: Blob | null = null;  // Store the last recorded blob for retrieval
 
+// Emotion classification settings
+let confidenceThreshold = 0.4;
+let useSmoothing = true;
+
+/**
+ * Update audio processing and emotion classification settings
+ */
+export const updateAudioSettings = (settings: {
+  confidenceThreshold?: number;
+  useSmoothing?: boolean;
+}): void => {
+  if (settings.confidenceThreshold !== undefined) {
+    confidenceThreshold = settings.confidenceThreshold;
+  }
+  
+  if (settings.useSmoothing !== undefined) {
+    useSmoothing = settings.useSmoothing;
+  }
+  
+  console.log('Audio settings updated:', { confidenceThreshold, useSmoothing });
+};
+
 /**
  * Initialize audio capture
  */
@@ -303,27 +325,35 @@ export const cleanupAudio = () => {
  * Process audio data and send to server
  */
 const processAudioData = (audioData: Float32Array) => {
-  // Only process and send data if we're actively recording
+  // Don't process data if not actively capturing
   if (!isRecording) {
     return;
   }
+
+  // Analyze audio data
+  const { isSpeech, speechRate } = analyzeAudioData(audioData);
   
-  // Apply more sophisticated speech detection
-  const speechAnalysis = analyzeAudioData(audioData);
-  
-  if (!speechAnalysis.isSpeech) {
-    // Still send a small packet to keep the connection active
-    // This helps the server know we're still here even if silent
-    const smallSample = new Float32Array(128).fill(0);
-    sendAudioDataToServer(smallSample);
-    return;
+  // Only send if we detect speech with higher threshold for quality
+  if (isSpeech) {
+    // Calculate a speech quality score based on energy level
+    const energy = calculateRMS(audioData);
+    const qualityScore = Math.min(energy * 10, 1); // Normalize to 0-1
+    
+    // Only process high quality audio to avoid misclassification
+    if (qualityScore > 0.15) { // Higher threshold for better quality
+      // Include settings and quality metadata
+      const metadata = {
+        isSpeech,
+        speechRate,
+        confidenceThreshold,
+        useSmoothing,
+        qualityScore
+      };
+      
+      // Send to server
+      sendAudioDataToServer(audioData, metadata);
+    }
   }
-  
-  // Add speech rate metadata to the audio data
-  sendAudioDataToServer(audioData, {
-    speechRate: speechAnalysis.speechRate,
-    isSpeech: true
-  });
 };
 
 /**

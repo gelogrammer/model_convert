@@ -113,16 +113,36 @@ def analyze_audio():
         return jsonify({"status": "error", "message": "No audio file provided"}), 400
     
     audio_file = request.files['audio']
+    confidence_threshold = request.form.get('confidence_threshold', 0.4, type=float)
     
     try:
         # Process audio file
         audio_data = audio_processor.process_audio_file(audio_file)
+        
+        # Check if speech is actually detected in the audio
+        if not audio_processor.detect_speech(audio_data):
+            return jsonify({
+                "status": "warning",
+                "message": "No clear speech detected in the audio",
+                "emotion": "neutral",
+                "confidence": 0.0,
+                "probabilities": {emotion: 0.0 for emotion in model_service.emotions}
+            })
         
         # Extract features
         features = audio_processor.extract_features(audio_data)
         
         # Predict emotion
         emotion, confidence, all_probabilities = model_service.predict_emotion(features)
+        
+        # Apply confidence threshold
+        if confidence < confidence_threshold:
+            # If confidence is low, default to neutral with a warning
+            original_emotion = emotion
+            emotion = "neutral"
+            message = f"Low confidence ({confidence:.2f}) for detected emotion '{original_emotion}', defaulting to neutral"
+        else:
+            message = f"Emotion detected with confidence: {confidence:.2f}"
         
         # Calculate speech rate
         speech_rate = audio_processor.calculate_speech_rate(audio_data)
@@ -137,6 +157,7 @@ def analyze_audio():
         
         response = {
             "status": "success",
+            "message": message,
             "emotion": emotion,
             "confidence": float(confidence),
             "speech_rate": float(speech_rate),
@@ -178,6 +199,9 @@ def handle_audio_stream(data):
         # Convert base64 audio data to numpy array
         audio_data = audio_processor.decode_audio_data(data['audio'])
         
+        # Get confidence threshold from client or use default
+        confidence_threshold = data.get('confidence_threshold', 0.4)
+        
         # Check if speech is detected
         is_speech = audio_processor.detect_speech(audio_data)
         
@@ -192,6 +216,15 @@ def handle_audio_stream(data):
             # Predict emotion
             emotion, confidence, all_probabilities = model_service.predict_emotion(features)
             
+            # Apply confidence threshold
+            if confidence < confidence_threshold:
+                # If confidence is low, default to neutral with a warning
+                original_emotion = emotion
+                emotion = "neutral"
+                message = f"Low confidence ({confidence:.2f}) for detected emotion '{original_emotion}'"
+            else:
+                message = f"Emotion detected: {emotion}"
+            
             # Calculate speech rate - prioritize client calculation if available
             speech_rate = client_speech_rate if client_speech_rate is not None else audio_processor.calculate_speech_rate(audio_data)
             
@@ -200,58 +233,39 @@ def handle_audio_stream(data):
             if asr_service:
                 try:
                     speech_characteristics = asr_service.process_audio(features)
-                    
-                    # If we have client-side speech rate, adjust tempo classification accordingly
-                    if client_speech_rate is not None:
-                        # Convert syllables/sec to WPM for tempo category
-                        wpm_rate = client_speech_rate * 60 / 1.5
-                        
-                        # Determine tempo category based on WPM
-                        if wpm_rate < 100:
-                            tempo_category = "Slow Tempo"
-                            tempo_idx = 2  # Index of Slow in tempo_categories
-                        elif wpm_rate < 150:
-                            tempo_category = "Medium Tempo"
-                            tempo_idx = 1  # Index of Medium in tempo_categories
-                        else:
-                            tempo_category = "Fast Tempo"
-                            tempo_idx = 0  # Index of Fast in tempo_categories
-                            
-                        # Update the tempo classification
-                        if 'tempo' in speech_characteristics:
-                            speech_characteristics['tempo']['category'] = tempo_category
-                            # High confidence since we measured it directly
-                            speech_characteristics['tempo']['confidence'] = 0.95
                 except Exception as e:
                     print(f"Error in ASR processing: {e}")
             
-            result = {
+            # Prepare response
+            response = {
+                'status': 'success',
+                'message': message,
+                'is_speech': True,
                 'emotion': emotion,
                 'confidence': float(confidence),
-                'speech_rate': float(speech_rate),
+                'speech_rate': float(speech_rate) if speech_rate is not None else 0,
                 'probabilities': {
                     emotion: float(prob) for emotion, prob in zip(model_service.emotions, all_probabilities)
-                },
-                'is_speech': True
+                }
             }
             
             # Add speech characteristics if available
             if speech_characteristics:
-                result["speech_characteristics"] = speech_characteristics
-                
-            # Send results back to client
-            emit('emotion_result', result)
+                response['speech_characteristics'] = speech_characteristics
         else:
-            # If no speech detected but client sent speech rate, still use that
-            if client_speech_rate is not None and client_metadata.get('isSpeech', False):
-                # Create basic result with just speech rate
-                result = {
-                    'is_speech': True,
-                    'speech_rate': float(client_speech_rate)
-                }
-                emit('emotion_result', result)
+            # No speech detected
+            response = {
+                'status': 'no_speech',
+                'message': 'No speech detected in audio',
+                'is_speech': False,
+                'emotion': 'neutral',
+                'confidence': 0.0
+            }
+        
+        # Emit result
+        emit('emotion_result', response)
     except Exception as e:
-        print(f"Error processing audio stream: {e}")
+        print(f"Error processing streaming audio: {e}")
         emit('error', {'message': str(e)})
 
 if __name__ == '__main__':

@@ -5,6 +5,7 @@ Model service for Speech Emotion Recognition.
 import numpy as np
 import tensorflow as tf
 import os
+from collections import deque
 
 # Register custom metrics to fix loading issues
 tf.keras.utils.get_custom_objects().update({
@@ -56,6 +57,11 @@ class ModelService:
         # Emotion mapping
         self.emotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise', 'neutral']
         
+        # Create emotion history for temporal smoothing
+        self.emotion_history = deque(maxlen=5)
+        self.current_emotion = None
+        self.emotion_stability_count = 0
+        
         print("Model service initialized")
     
     def _create_placeholder_model(self):
@@ -65,12 +71,13 @@ class ModelService:
         outputs = tf.keras.layers.Dense(7, activation='softmax')(x)
         self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
     
-    def predict_emotion(self, features):
+    def predict_emotion(self, features, apply_smoothing=True):
         """
         Predict emotion from audio features.
         
         Args:
             features: Extracted audio features
+            apply_smoothing: Whether to apply temporal smoothing
             
         Returns:
             Tuple of (emotion, confidence, all_probabilities)
@@ -90,9 +97,89 @@ class ModelService:
             # Standard model has a single output
             emotion_probs = predictions[0]
         
-        # Get the predicted emotion
+        # Get the raw predicted emotion
         emotion_idx = np.argmax(emotion_probs)
-        emotion = self.emotions[emotion_idx]
-        confidence = emotion_probs[emotion_idx]
+        raw_emotion = self.emotions[emotion_idx]
+        raw_confidence = emotion_probs[emotion_idx]
         
-        return emotion, confidence, emotion_probs
+        # Apply temporal smoothing if requested
+        if apply_smoothing:
+            smoothed_emotion, smoothed_confidence = self._apply_temporal_smoothing(raw_emotion, emotion_probs)
+            return smoothed_emotion, smoothed_confidence, emotion_probs
+        else:
+            return raw_emotion, raw_confidence, emotion_probs
+    
+    def _apply_temporal_smoothing(self, current_raw_emotion, emotion_probs):
+        """
+        Apply temporal smoothing to emotion predictions to reduce jitter.
+        
+        Args:
+            current_raw_emotion: Current raw emotion prediction
+            emotion_probs: Current emotion probabilities
+            
+        Returns:
+            Tuple of (smoothed_emotion, smoothed_confidence)
+        """
+        # Add current prediction to history
+        self.emotion_history.append((current_raw_emotion, emotion_probs))
+        
+        # Count occurrences of each emotion in history with weighting
+        # More recent emotions are weighted higher
+        emotion_counts = {}
+        emotion_total_probs = {}
+        total_weights = 0
+        
+        for idx, (emotion, probs) in enumerate(self.emotion_history):
+            # Apply recency weight - more recent entries have higher weight
+            weight = 1.0 + idx * 0.5  # Increase weight for more recent samples
+            total_weights += weight
+            
+            # Count occurrences
+            if emotion not in emotion_counts:
+                emotion_counts[emotion] = 0
+                emotion_total_probs[emotion] = 0
+            
+            emotion_counts[emotion] += weight
+            emotion_total_probs[emotion] += probs[self.emotions.index(emotion)] * weight
+        
+        # Find the most frequent emotion
+        most_frequent_emotion = None
+        max_count = 0
+        
+        for emotion, count in emotion_counts.items():
+            if count > max_count:
+                max_count = count
+                most_frequent_emotion = emotion
+        
+        # Calculate weighted average confidence for most frequent emotion
+        avg_confidence = emotion_total_probs[most_frequent_emotion] / emotion_counts[most_frequent_emotion]
+        
+        # Check if emotion has changed
+        if self.current_emotion != most_frequent_emotion:
+            # Only switch emotions if the new one has significantly higher confidence
+            if self.current_emotion and self.emotion_stability_count >= 3:
+                current_emotion_confidence = emotion_total_probs.get(self.current_emotion, 0)
+                if current_emotion_confidence > 0 and avg_confidence < current_emotion_confidence * 1.2:
+                    # Not enough improvement to switch
+                    return self.current_emotion, current_emotion_confidence / emotion_counts.get(self.current_emotion, 1)
+            
+            # Reset stability counter for new emotion
+            self.emotion_stability_count = 1
+            self.current_emotion = most_frequent_emotion
+        else:
+            # Increment stability counter for same emotion
+            self.emotion_stability_count += 1
+        
+        # Apply stability threshold - only change emotion if it's stable for multiple frames
+        if self.emotion_stability_count >= 2:
+            # Emotion is stable enough to report
+            smoothed_emotion = most_frequent_emotion
+        else:
+            # Emotion is not stable enough, use neutral or previous emotion
+            smoothed_emotion = self.current_emotion if self.current_emotion else 'neutral'
+        
+        # Apply weighted confidence based on stability
+        stability_factor = min(1.0, self.emotion_stability_count / 5)
+        smoothed_confidence = avg_confidence * stability_factor
+        
+        return smoothed_emotion, smoothed_confidence

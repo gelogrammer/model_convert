@@ -253,6 +253,10 @@ function App() {
   // Speech detection timeout
   const speechTimeoutRef = useRef<number | null>(null);
   const [calibratedEmotionResult, setCalibratedEmotionResult] = useState<EmotionResult | null>(null);
+  
+  // Settings for emotion classification
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.4);
+  const [useSmoothing, setUseSmoothing] = useState<boolean>(true);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -378,17 +382,20 @@ function App() {
   // Apply calibration to emotion results
   useEffect(() => {
     if (emotionResult) {
-      const confidenceThresholds = loadConfidenceThresholds();
-      const calibratedResult = applyCalibrationToResult(emotionResult, confidenceThresholds);
+      // Use local variable instead of state
+      const thresholds = loadConfidenceThresholds();
+      const calibratedResult = applyCalibrationToResult(emotionResult, thresholds);
       setCalibratedEmotionResult(calibratedResult);
     } else {
       setCalibratedEmotionResult(null);
     }
-  }, [emotionResult]);
+  }, [emotionResult]); // Only re-run when emotionResult changes
 
   // Handle start/stop capturing
   const toggleCapturing = async () => {
     if (isCapturing) {
+      // Reset emotion state when stopping
+      setEmotionResult(null);
       setIsSpeaking(false);
       if (speechTimeoutRef.current) {
         window.clearTimeout(speechTimeoutRef.current);
@@ -585,12 +592,18 @@ function App() {
 
   // Handle calibration data updates
   const handleCalibrationUpdate = (_: CalibrationData[]) => {
-    // Recalibrate current result if it exists
+    // Recalibrate current result if it exists without triggering state updates
     if (emotionResult) {
-      const confidenceThresholds = loadConfidenceThresholds();
-      const calibratedResult = applyCalibrationToResult(emotionResult, confidenceThresholds);
+      // Use local variable instead of state
+      const thresholds = loadConfidenceThresholds();
+      const calibratedResult = applyCalibrationToResult(emotionResult, thresholds);
       setCalibratedEmotionResult(calibratedResult);
     }
+  };
+
+  const handleEmotionSettingsChange = (settings: { confidenceThreshold: number, useSmoothing: boolean }) => {
+    setConfidenceThreshold(settings.confidenceThreshold);
+    setUseSmoothing(settings.useSmoothing);
   };
 
   return (
@@ -831,15 +844,18 @@ function App() {
                 mb: { xs: 2, md: 4 }
               }}>
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
-                  <AudioCapture
-                    isCapturing={isCapturing}
+                  <AudioCapture 
+                    isCapturing={isCapturing} 
                     isConnected={isConnected}
+                    confidenceThreshold={confidenceThreshold}
+                    useSmoothing={useSmoothing}
                   />
                 </Paper>
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <EmotionDisplay
-                    emotionResult={isCapturing && isSpeaking ? calibratedEmotionResult : null}
+                    emotionResult={isCapturing && isSpeaking ? emotionResult : null}
                     isCapturing={isCapturing}
+                    onSettingsChange={handleEmotionSettingsChange}
                   />
                 </Paper>
               </Box>
@@ -852,13 +868,13 @@ function App() {
               }}>
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <SpeechTempoDisplay
-                    speechRate={isCapturing && isSpeaking ? emotionResult?.speech_rate : undefined}
+                    speechRate={isCapturing ? emotionResult?.speech_rate : undefined}
                     isCapturing={isCapturing}
                   />
                 </Paper>
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <EmotionCalibration
-                    emotionResult={isCapturing && isSpeaking ? emotionResult : null}
+                    emotionResult={isCapturing ? emotionResult : null}
                     isCapturing={isCapturing}
                     onCalibrationUpdate={handleCalibrationUpdate}
                   />
@@ -881,7 +897,7 @@ function App() {
                 )}
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <Feedback
-                    emotionResult={isCapturing && isSpeaking ? calibratedEmotionResult : null}
+                    emotionResult={isCapturing ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
                 </Paper>

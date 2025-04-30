@@ -5,14 +5,18 @@ import { uploadRecording, RecordingMetadata } from '../services/supabaseService'
 
 interface AudioRecorderProps {
   onRecordingStart?: () => void;
-  onRecordingStop?: (blob: Blob) => void;
+  onRecordingStop?: (blob: Blob, options?: { confidenceThreshold?: number, useSmoothing?: boolean }) => void;
   emotionResult?: any;
+  confidenceThreshold?: number;
+  useSmoothing?: boolean;
 }
 
 const AudioRecorder: React.FC<AudioRecorderProps> = ({ 
   onRecordingStart, 
   onRecordingStop,
-  emotionResult
+  emotionResult,
+  confidenceThreshold = 0.4,
+  useSmoothing = true
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -49,7 +53,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
         stream.getTracks().forEach(track => track.stop());
         
         if (onRecordingStop) {
-          onRecordingStop(audioBlob);
+          onRecordingStop(audioBlob, { confidenceThreshold, useSmoothing });
         }
       };
       
@@ -107,7 +111,11 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       // Prepare metadata with emotion data if available
       const metadata: RecordingMetadata = {
         duration: recordingDuration,
-        emotionData: emotionResult || {}
+        emotionData: emotionResult || {},
+        settings: {
+          confidenceThreshold,
+          useSmoothing
+        }
       };
       
       console.log('Uploading with metadata:', metadata);

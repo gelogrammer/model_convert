@@ -405,4 +405,8 @@ export const deleteRecording = async (id: number, filePath: string) => {
 export interface RecordingMetadata {
   duration: number;
   emotionData?: any;
+  settings?: {
+    confidenceThreshold?: number;
+    useSmoothing?: boolean;
+  };
 } 

@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { Typography, Box, CircularProgress, Chip } from '@mui/material';
-import { initializeAudioCapture, startAudioCapture, stopAudioCapture, cleanupAudio, getAudioVisualizationData } from '../services/audioService';
+import { Typography, Box, Chip } from '@mui/material';
+import { initializeAudioCapture, startAudioCapture, stopAudioCapture, cleanupAudio, getAudioVisualizationData, updateAudioSettings } from '../services/audioService';
 
 interface AudioCaptureProps {
   isCapturing: boolean;
   isConnected: boolean;
+  confidenceThreshold?: number;
+  useSmoothing?: boolean;
 }
 
-const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected }) => {
+const AudioCapture: React.FC<AudioCaptureProps> = ({ 
+  isCapturing, 
+  isConnected, 
+  confidenceThreshold = 0.4,
+  useSmoothing = true
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -16,18 +23,23 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
   const [isSpeaking, setIsSpeaking] = useState(false);
   const speakingTimeoutRef = useRef<number | null>(null);
 
-  // Initialize audio capture
+  // Initialize audio capture only when connected
   useEffect(() => {
     const initialize = async () => {
       try {
         if (isConnected) {
-          const success = await initializeAudioCapture();
-          setIsInitialized(success);
-          
-          if (!success) {
-            setError('Failed to initialize audio capture. Please check your microphone permissions.');
-          } else {
-            setError(null);
+          // Only initialize if we're actually capturing
+          if (isCapturing) {
+            const success = await initializeAudioCapture();
+            setIsInitialized(success);
+            
+            if (!success) {
+              setError('Failed to initialize audio capture. Please check your microphone permissions.');
+            } else {
+              setError(null);
+              // Pass initial settings
+              updateAudioSettings({ confidenceThreshold, useSmoothing });
+            }
           }
         }
       } catch (err) {
@@ -48,7 +60,14 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
         window.clearTimeout(speakingTimeoutRef.current);
       }
     };
-  }, [isConnected]);
+  }, [isConnected, isCapturing, confidenceThreshold, useSmoothing]);
+
+  // Update settings when they change
+  useEffect(() => {
+    if (isInitialized) {
+      updateAudioSettings({ confidenceThreshold, useSmoothing });
+    }
+  }, [isInitialized, confidenceThreshold, useSmoothing]);
 
   // Start/stop audio capture
   useEffect(() => {
@@ -105,45 +124,49 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
       ctx.fillStyle = '#1E293B';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Draw visualization
-      const barWidth = (canvas.width / dataArray.length) * 2.5;
-      let x = 0;
-      
-      for (let i = 0; i < dataArray.length; i++) {
-        const barHeight = (dataArray[i] / 255) * canvas.height;
+      // Draw visualization only when actively capturing
+      if (isCapturing) {
+        const barWidth = (canvas.width / dataArray.length) * 2.5;
+        let x = 0;
         
-        // Create a gradient effect with colors that work well on dark background
-        const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
-        
-        // Use themed colors
-        const hue = i / dataArray.length * 360;
-        const saturation = 80; 
-        const lightness = 65;
-        
-        gradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, 0.8)`);
-        gradient.addColorStop(1, `hsla(${hue}, ${saturation}%, ${lightness + 10}%, 0.6)`);
-        
-        ctx.fillStyle = gradient;
-        
-        // Draw rounded top bars
-        const barWidthActual = barWidth - 1;
-        const radius = barWidthActual / 2;
-        
-        ctx.beginPath();
-        ctx.moveTo(x + radius, canvas.height - barHeight);
-        ctx.lineTo(x + barWidthActual - radius, canvas.height - barHeight);
-        ctx.quadraticCurveTo(x + barWidthActual, canvas.height - barHeight, x + barWidthActual, canvas.height - barHeight + radius);
-        ctx.lineTo(x + barWidthActual, canvas.height);
-        ctx.lineTo(x, canvas.height);
-        ctx.lineTo(x, canvas.height - barHeight + radius);
-        ctx.quadraticCurveTo(x, canvas.height - barHeight, x + radius, canvas.height - barHeight);
-        ctx.closePath();
-        ctx.fill();
-        
-        x += barWidth + 1;
+        for (let i = 0; i < dataArray.length; i++) {
+          const barHeight = (dataArray[i] / 255) * canvas.height;
+          
+          // Create a gradient effect with colors that work well on dark background
+          const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+          
+          // Use themed colors
+          const hue = i / dataArray.length * 360;
+          const saturation = 80; 
+          const lightness = 65;
+          
+          gradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, 0.8)`);
+          gradient.addColorStop(1, `hsla(${hue}, ${saturation}%, ${lightness + 10}%, 0.6)`);
+          
+          ctx.fillStyle = gradient;
+          
+          // Draw rounded top bars
+          const barWidthActual = barWidth - 1;
+          const radius = barWidthActual / 2;
+          
+          ctx.beginPath();
+          ctx.moveTo(x + radius, canvas.height - barHeight);
+          ctx.lineTo(x + barWidthActual - radius, canvas.height - barHeight);
+          ctx.quadraticCurveTo(x + barWidthActual, canvas.height - barHeight, x + barWidthActual, canvas.height - barHeight + radius);
+          ctx.lineTo(x + barWidthActual, canvas.height);
+          ctx.lineTo(x, canvas.height);
+          ctx.lineTo(x, canvas.height - barHeight + radius);
+          ctx.quadraticCurveTo(x, canvas.height - barHeight, x + radius, canvas.height - barHeight);
+          ctx.closePath();
+          ctx.fill();
+          
+          x += barWidth + 1;
+        }
       }
       
-      animationRef.current = requestAnimationFrame(draw);
+      if (isCapturing) {
+        animationRef.current = requestAnimationFrame(draw);
+      }
     };
     
     draw();
@@ -197,110 +220,76 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
         <Typography color="error" sx={{ fontSize: { xs: '0.8rem', md: '0.9rem' } }}>{error}</Typography>
       ) : (
         <>
-          <Box sx={{ 
-            display: 'flex', 
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            mb: { xs: 1, md: 2 }
-          }}>
-            <Typography variant="body2" sx={{ fontSize: { xs: '0.75rem', md: '0.85rem' } }}>
-              {isCapturing ? (isSpeaking ? 'Speech detected' : 'No speech detected') : 'Click Start Capturing to begin'}
-            </Typography>
-            
-            {isCapturing && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box sx={{
-                  width: { xs: 6, md: 8 },
-                  height: { xs: 6, md: 8 },
-                  borderRadius: '50%',
-                  bgcolor: isSpeaking ? 'success.main' : '#aaa',
-                  boxShadow: isSpeaking ? '0 0 10px rgba(76, 175, 80, 0.5)' : 'none',
-                  animation: isSpeaking ? 'blink 1s infinite' : 'none',
-                  '@keyframes blink': {
-                    '0%': { opacity: 0.5 },
-                    '50%': { opacity: 1 },
-                    '100%': { opacity: 0.5 }
-                  }
-                }} />
-                <Typography variant="body2" color={isSpeaking ? 'success.main' : 'text.secondary'} fontWeight={isSpeaking ? 500 : 400} sx={{ fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
-                  {isSpeaking ? 'Live' : 'Idle'}
-                </Typography>
-              </Box>
-            )}
-          </Box>
-          
-          <Box sx={{ 
-            mt: { xs: 1, md: 2 }, 
-            bgcolor: '#1E293B', // Dark theme background 
-            borderRadius: '12px', 
-            overflow: 'hidden',
-            position: 'relative',
-            border: isCapturing ? '1px solid rgba(124, 58, 237, 0.2)' : '1px solid rgba(255, 255, 255, 0.08)',
-            boxShadow: isCapturing ? 'inset 0 2px 4px rgba(0, 0, 0, 0.2)' : 'none',
-            flexGrow: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: { xs: 120, sm: 150, md: 200 },
-          }}>
-            <canvas 
-              ref={canvasRef} 
-              width={500} 
-              height={200} 
-              style={{ 
-                width: '100%', 
-                height: '100%', 
-                display: 'block',
-                maxHeight: '100%'
-              }}
-            />
-            
-            {!isCapturing && !isInitialized && (
+          {!isCapturing ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', 
+                       textAlign: 'center', flexDirection: 'column' }}>
+              <Typography variant="body1" sx={{ mb: 2 }}>
+                Click Start Capturing to begin
+              </Typography>
+              <canvas 
+                ref={canvasRef}
+                width={500}
+                height={200}
+                style={{ 
+                  width: '100%', 
+                  height: '100%',
+                  maxHeight: '200px',
+                  borderRadius: '12px',
+                  backgroundColor: '#1E293B',
+                  opacity: 0.5
+                }}
+              />
+            </Box>
+          ) : (
+            <Box sx={{ position: 'relative', height: '100%', flexGrow: 1 }}>
+              <canvas 
+                ref={canvasRef}
+                width={500}
+                height={200}
+                style={{ 
+                  width: '100%', 
+                  height: '100%',
+                  maxHeight: '200px',
+                  borderRadius: '12px',
+                  backgroundColor: '#1E293B'
+                }}
+              />
+              {/* Audio level indicator */}
               <Box sx={{ 
-                position: 'absolute',
-                top: 0,
-                left: 0,
+                position: 'absolute', 
+                bottom: '-30px', 
+                left: 0, 
                 right: 0,
-                bottom: 0,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(0, 0, 0, 0.2)'
+                justifyContent: 'flex-end',
+                gap: 1
               }}>
-                <CircularProgress size={30} />
+                <Typography variant="caption" sx={{ whiteSpace: 'nowrap', fontSize: '0.7rem' }}>
+                  Audio level:
+                </Typography>
+                <Box sx={{ 
+                  flex: 1,
+                  height: '4px',
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}>
+                  <Box sx={{ 
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: `${audioLevel * 100}%`,
+                    backgroundColor: isSpeaking ? '#10B981' : '#7C3AED',
+                    borderRadius: '4px',
+                    transition: 'width 0.1s ease-out'
+                  }} />
+                </Box>
               </Box>
-            )}
-          </Box>
-          
-          <Box sx={{ 
-            display: 'flex',
-            justifyContent: 'flex-end',
-            alignItems: 'center',
-            gap: 1,
-            mt: { xs: 1, md: 2 }
-          }}>
-            <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: { xs: '0.65rem', md: '0.75rem' } }}>
-              Audio level:
-            </Typography>
-            <Box sx={{ 
-              bgcolor: 'rgba(255,255,255,0.1)',
-              width: { xs: 60, md: 100 },
-              height: { xs: 6, md: 8 },
-              borderRadius: 1,
-              overflow: 'hidden',
-              position: 'relative'
-            }}>
-              <Box sx={{ 
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: `${audioLevel * 100}%`,
-                bgcolor: isSpeaking ? 'success.main' : 'primary.main',
-                transition: 'width 0.2s ease-out'
-              }} />
             </Box>
-          </Box>
+          )}
         </>
       )}
     </Box>
