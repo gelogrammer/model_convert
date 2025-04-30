@@ -54,56 +54,41 @@ interface LocalRecording {
 export const ensureCompatibleAudioFormat = async (blob: Blob): Promise<Blob> => {
   console.log('Checking audio format compatibility for blob type:', blob.type);
   
-  // Most widely supported audio formats across browsers
-  const universalFormats = ['audio/wav', 'audio/mpeg', 'audio/mp3'];
+  // Most widely supported audio format across browsers
+  const targetFormat = 'audio/webm';
   
-  // If we already have a universally compatible format, return as is
-  if (universalFormats.some(format => blob.type.includes(format.split('/')[1]))) {
-    console.log('Audio is already in a universally compatible format');
+  // If the blob is already a webm file, we're good to go
+  if (blob.type === targetFormat || blob.type === 'audio/webm;codecs=opus') {
+    console.log('Audio is already in webm format, keeping as-is');
     return blob;
   }
   
   try {
-    // For WebM, convert to WAV format
-    if (blob.type.includes('webm')) {
-      console.log('Converting WebM format to WAV for better browser support');
-      try {
-        // Convert WebM to WAV
-        const wavBlob = new Blob([await blob.arrayBuffer()], { 
-          type: 'audio/wav' 
-        });
-        return wavBlob;
-      } catch (error) {
-        console.error('WebM to WAV conversion failed:', error);
-      }
+    // Create an audio element to test playability
+    const audio = new Audio();
+    const canPlayWebm = audio.canPlayType('audio/webm');
+    
+    // Empty string means "no" in the canPlayType API
+    if (canPlayWebm === '') {
+      console.log('This browser cannot play webm format, trying with original format:', blob.type);
+      // If browser can't play webm, keep the original format
+      return blob;
     }
     
-    // Create a temporary audio context
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const arrayBuffer = await blob.arrayBuffer();
-    
-    try {
-      // Try to decode the audio data to verify it's valid audio
-      await audioContext.decodeAudioData(arrayBuffer);
-      
-      // For better compatibility, convert to WAV format
-      // This format is well-supported across browsers
-      const wavBlob = new Blob([arrayBuffer], { type: 'audio/wav' });
-      console.log('Converted to WAV format for better compatibility');
-      return wavBlob;
-    } catch (decodeErr) {
-      console.warn('Failed to decode audio, trying alternative formats', decodeErr);
-      
-      // Try with WAV format first
-      const wavBlob = new Blob([arrayBuffer], { type: 'audio/wav' });
-      console.log('Set WAV MIME type for better browser recognition');
-      return wavBlob;
+    // Check blob validity
+    if (blob.size === 0) {
+      console.error('Received empty blob for format conversion');
+      return blob; // Return original even if empty
     }
+    
+    // For all formats, just change the MIME type to webm
+    // This is simpler than trying to convert and won't lose data
+    console.log('Setting consistent audio/webm MIME type for better compatibility');
+    return new Blob([await blob.arrayBuffer()], { type: targetFormat });
   } catch (err) {
     console.error('Audio format conversion failed:', err);
-    
-    // If all else fails, try with a WAV MIME type
-    return new Blob([await blob.arrayBuffer()], { type: 'audio/wav' });
+    // Return original blob on error
+    return blob;
   }
 };
 
@@ -139,7 +124,11 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
     console.log('Starting saveRecordingToDatabase with emotion data:', emotionData);
     
     const recordedBlob = getRecordedAudio();
-    console.log('Retrieved audio blob:', recordedBlob ? `Size: ${recordedBlob.size} bytes, Type: ${recordedBlob.type}` : 'NULL');
+    console.log('Retrieved audio blob:', 
+      recordedBlob 
+        ? `Size: ${recordedBlob.size} bytes, Type: ${recordedBlob.type}` 
+        : 'NULL'
+    );
     
     if (!recordedBlob) {
       console.error('No recorded audio blob available - make sure recording is stopped properly');
@@ -151,9 +140,28 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
       return false;
     }
     
+    // Log the blob details
+    const uuid = Date.now().toString();
+    console.log(`[${uuid}] Starting processing of audio blob:`, {
+      size: recordedBlob.size,
+      type: recordedBlob.type,
+      timestamp: new Date().toISOString()
+    });
+    
     // Ensure audio format is compatible with browsers
-    let finalBlob = await ensureCompatibleAudioFormat(recordedBlob);
-    console.log('Processed audio blob for compatibility:', finalBlob.type);
+    let finalBlob;
+    try {
+      finalBlob = await ensureCompatibleAudioFormat(recordedBlob);
+      console.log(`[${uuid}] Processed audio blob for compatibility:`, {
+        originalType: recordedBlob.type,
+        newType: finalBlob.type,
+        originalSize: recordedBlob.size,
+        newSize: finalBlob.size
+      });
+    } catch (formatError) {
+      console.error(`[${uuid}] Format conversion error:`, formatError);
+      finalBlob = recordedBlob; // Use original on error
+    }
     
     // Create filename with correct extension based on actual type
     let fileExtension = 'wav'; // Default to most compatible format

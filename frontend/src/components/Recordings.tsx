@@ -644,6 +644,8 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
 
   // Format duration
   const formatDuration = (ms: number): string => {
+    if (!ms || isNaN(ms)) return '0:00';
+    
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;

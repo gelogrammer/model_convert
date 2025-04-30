@@ -286,28 +286,9 @@ export const startAudioCapture = async (): Promise<boolean> => {
   // Set up MediaRecorder for highest quality recording
   try {
     if (mediaStream) {
-      // Get supported media recorder MIME types
-      const supportedMimeTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/mp4',
-        'audio/mp3',
-        'audio/mpeg',
-        'audio/wav',
-        'audio/ogg',
-        'audio/ogg;codecs=opus'
-      ].filter(mimeType => {
-        try {
-          return MediaRecorder.isTypeSupported(mimeType);
-        } catch (e) {
-          return false;
-        }
-      });
-      
-      console.log('Supported MediaRecorder MIME types:', supportedMimeTypes);
-      
-      // Choose the best supported MIME type (prefer webm with opus codec for quality)
-      const mimeType = supportedMimeTypes[0] || 'audio/webm';
+      // Simplify by using audio/webm format which has wide support
+      const mimeType = 'audio/webm';
+      console.log('Using consistent audio format:', mimeType);
       
       // Create MediaRecorder with appropriate options
       const recorderOptions = {
@@ -320,25 +301,28 @@ export const startAudioCapture = async (): Promise<boolean> => {
       try {
         mediaRecorder = new MediaRecorder(mediaStream, recorderOptions);
       } catch (e) {
-        console.warn('Failed to create MediaRecorder with options, trying default', e);
+        console.warn('Failed to create MediaRecorder with audio/webm, falling back to default format', e);
         mediaRecorder = new MediaRecorder(mediaStream);
+        console.log('Created MediaRecorder with default format:', mediaRecorder.mimeType);
       }
       
-      // Start recording with timeslices for better handling of long recordings
+      // Clear chunks array before starting
       recordedChunks = [];
       
-      // Set up data handler
+      // Set up data handler before starting recording
       mediaRecorder.ondataavailable = (event: BlobEvent) => {
-        if (event.data.size > 0) {
-          console.log('MediaRecorder data available, size:', event.data.size);
+        if (event.data && event.data.size > 0) {
+          console.log('MediaRecorder data available, size:', event.data.size, 'type:', event.data.type);
           recordedChunks.push(event.data);
+        } else {
+          console.warn('Received empty data event from MediaRecorder');
         }
       };
       
-      // Start the recorder
-      const timeslice = 1000; // Collect data in 1-second chunks
+      // Start the recorder with smaller timeslice for more frequent chunks
+      const timeslice = 100; // Collect data in 100ms chunks instead of 1000ms
       mediaRecorder.start(timeslice);
-      console.log('MediaRecorder started with timeslice:', timeslice);
+      console.log('MediaRecorder started with timeslice:', timeslice, 'using format:', mediaRecorder.mimeType);
       
       isRecording = true;
       
@@ -389,195 +373,78 @@ export const stopAudioCapture = async () => {
   if (mediaRecorder && isRecording) {
     try {
       console.log('Stopping MediaRecorder...');
-      const recorder = mediaRecorder; // Store reference to avoid null check issues
       
       // Return a promise that resolves when the recording is ready
       return new Promise<void>((resolve) => {
         // Set up onstop handler before calling stop
-        const originalOnStop = recorder.onstop;
-        recorder.onstop = (event: Event) => {
+        mediaRecorder!.onstop = () => {
           console.log('MediaRecorder stopped, creating recording blob');
           
           // Verify we actually have recorded chunks
           console.log(`We have ${recordedChunks.length} recorded chunks`);
-          if (recordedChunks.length === 0) {
-            console.warn('No recorded chunks available! Creating a dummy recording to avoid errors');
-            // Create a small dummy recording (1 second of silence) to prevent null blob errors
-            const sampleRate = 44100;
-            const duration = 1; // 1 second
-            const numSamples = sampleRate * duration;
-            const silentBuffer = new Float32Array(numSamples);
-            // Fill with silence (all zeros)
-            for (let i = 0; i < numSamples; i++) {
-              silentBuffer[i] = 0;
-            }
-            const wavBlob = convertToWav(silentBuffer, sampleRate);
-            recordedChunks = [wavBlob];
-            lastRecordedBlob = wavBlob;
-            console.log('Created fallback silent recording, size:', wavBlob.size, 'type:', wavBlob.type);
-          }
           
-          // Check if chunks exist but may be empty
-          let hasValidChunks = false;
-          for (const chunk of recordedChunks) {
-            if (chunk.size > 0) {
-              hasValidChunks = true;
-              break;
-            }
-          }
-
-          if (!hasValidChunks && recordedChunks.length > 0) {
-            console.warn('All recorded chunks are empty! Creating a fallback recording');
-            const sampleRate = 44100;
-            const duration = 1; // 1 second
-            const numSamples = sampleRate * duration;
-            const silentBuffer = new Float32Array(numSamples);
-            // Fill with silence (all zeros)
-            for (let i = 0; i < numSamples; i++) {
-              silentBuffer[i] = 0;
-            }
-            const wavBlob = convertToWav(silentBuffer, sampleRate);
-            recordedChunks = [wavBlob];
-            lastRecordedBlob = wavBlob;
-            console.log('Created fallback silent recording (due to empty chunks), size:', wavBlob.size, 'type:', wavBlob.type);
+          if (recordedChunks.length === 0) {
+            console.warn('No recorded chunks available');
+            isRecording = false;
+            resolve();
+            return;
           }
           
           // Create the blob from the chunks
           try {
-            // First try with the MIME type of the first chunk
+            // Use the MIME type of the first chunk for better format consistency
             const mimeType = recordedChunks[0]?.type || 'audio/webm';
             lastRecordedBlob = new Blob(recordedChunks, { type: mimeType });
             
-            if (lastRecordedBlob.size === 0) {
-              console.warn('Created blob is empty, trying with WAV type');
-              // Try again with explicit WAV type
-              lastRecordedBlob = new Blob(recordedChunks, { type: 'audio/wav' });
-            }
+            console.log('Recording blob created with size:', lastRecordedBlob.size, 'type:', lastRecordedBlob.type);
             
             if (lastRecordedBlob.size === 0) {
-              console.warn('Blob still empty, creating a synthetic silent audio');
-              const sampleRate = 44100;
-              const duration = 1; // 1 second
-              const numSamples = sampleRate * duration;
-              const silentBuffer = new Float32Array(numSamples);
-              lastRecordedBlob = convertToWav(silentBuffer, sampleRate);
+              console.warn('Created blob is empty');
             }
           } catch (blobError) {
             console.error('Error creating blob from chunks:', blobError);
-            // Create a synthetic silent audio as fallback
-            const sampleRate = 44100;
-            const duration = 1; // 1 second
-            const numSamples = sampleRate * duration;
-            const silentBuffer = new Float32Array(numSamples);
-            lastRecordedBlob = convertToWav(silentBuffer, sampleRate);
-            }
-            
-            console.log('Recording finished, blob created with size:', lastRecordedBlob.size, 'type:', lastRecordedBlob.type);
-          
-          // Verify the blob is valid
-          if (lastRecordedBlob.size === 0) {
-            console.error('ERROR: Created blob is still empty after all attempts!');
-          } else {
-            console.log('Successfully created audio blob with size:', lastRecordedBlob.size);
-          }
-            
-            // Ensure we have at least one chunk in recordedChunks for getRecordedAudio
-            if (recordedChunks.length === 0) {
-              recordedChunks = [lastRecordedBlob];
-            }
-            
-            // Analyze the recording automatically when stopping
-            analyzeRecordedAudio().then(result => {
-              console.log('Automatic audio analysis completed on stop:', 
-                result ? 'success' : 'failed');
-            });
-          
-          // Call original handler if it exists
-          if (originalOnStop) {
-            originalOnStop.call(recorder, event);
           }
           
-          isRecording = false;
-          resolve();
+          // Analyze the recording automatically when stopping
+          analyzeRecordedAudio().then(result => {
+            console.log('Automatic audio analysis completed on stop:', 
+              result ? 'success' : 'failed');
+            
+            isRecording = false;
+            resolve();
+          });
         };
         
-        // Add a final dataavailable event handler to make sure we get the last bit of audio
+        // Add a final dataavailable event handler
         const dataHandler = (event: BlobEvent) => {
           console.log('Final data available event, size:', event.data.size);
           if (event.data.size > 0) {
             recordedChunks.push(event.data);
-          } else {
-            console.warn('Received empty data event');
           }
-          recorder.removeEventListener('dataavailable', dataHandler);
         };
         
-        recorder.addEventListener('dataavailable', dataHandler);
+        mediaRecorder!.addEventListener('dataavailable', dataHandler);
         
-        // Request all remaining data
+        // Request all remaining data and then stop the recorder
         try {
-        recorder.requestData();
-        } catch (requestError) {
-          console.warn('Error requesting data from recorder:', requestError);
+          mediaRecorder!.requestData();
+          
+          // Stop the recorder immediately after requesting data
+          // No need for timeout which could cause timing issues
+          mediaRecorder!.stop();
+        } catch (err) {
+          console.error('Error stopping MediaRecorder:', err);
+          isRecording = false;
+          resolve();
         }
-        
-        // Stop the recorder after a brief delay to ensure data is captured
-        setTimeout(() => {
-          try {
-            recorder.stop();
-          } catch (err) {
-            console.error('Error stopping MediaRecorder:', err);
-            
-            // If stopping failed, create a fallback recording
-            if (recordedChunks.length === 0) {
-              console.warn('No recorded chunks after stop error, creating fallback');
-              const sampleRate = 44100;
-              const duration = 1; // 1 second
-              const numSamples = sampleRate * duration;
-              const silentBuffer = new Float32Array(numSamples);
-              const wavBlob = convertToWav(silentBuffer, sampleRate);
-              recordedChunks = [wavBlob];
-              lastRecordedBlob = wavBlob;
-            }
-            
-            isRecording = false;
-            resolve();
-          }
-        }, 500); // Increased delay to ensure data capture
       });
     } catch (error) {
       console.error('Error stopping MediaRecorder:', error);
-      
-      // Create a fallback recording in case of error
-      if (recordedChunks.length === 0) {
-        console.warn('No recorded chunks after error, creating fallback');
-        const sampleRate = 44100;
-        const duration = 1; // 1 second
-        const numSamples = sampleRate * duration;
-        const silentBuffer = new Float32Array(numSamples);
-        const wavBlob = convertToWav(silentBuffer, sampleRate);
-        recordedChunks = [wavBlob];
-        lastRecordedBlob = wavBlob;
-      }
-      
       isRecording = false;
       return Promise.resolve();
     }
   } else {
     console.log('No active MediaRecorder to stop');
-    
-    // Create a fallback recording if we don't have any
-    if (recordedChunks.length === 0 || !lastRecordedBlob) {
-      console.warn('No recorded chunks and no active recorder, creating fallback');
-      const sampleRate = 44100;
-      const duration = 1; // 1 second
-      const numSamples = sampleRate * duration;
-      const silentBuffer = new Float32Array(numSamples);
-      const wavBlob = convertToWav(silentBuffer, sampleRate);
-      recordedChunks = [wavBlob];
-      lastRecordedBlob = wavBlob;
-    }
-    
     return Promise.resolve();
   }
 };
@@ -823,126 +690,46 @@ export const getAudioVisualizationData = (): Uint8Array | null => {
 };
 
 /**
- * Get recorded audio as blob
+ * Get the recorded audio as a blob
  */
 export const getRecordedAudio = (): Blob | null => {
-  console.log('getRecordedAudio called');
+  console.log('getRecordedAudio called, checking for recorded data');
   
-  // If we have a lastRecordedBlob, use it
+  // If we have a stored blob, return that first
   if (lastRecordedBlob && lastRecordedBlob.size > 0) {
-    console.log('Returning cached recording blob, size:', lastRecordedBlob.size, 'type:', lastRecordedBlob.type);
+    console.log('Returning last recorded blob:', {
+      size: lastRecordedBlob.size,
+      type: lastRecordedBlob.type
+    });
     return lastRecordedBlob;
   }
   
-  // Otherwise, create a new one if we have chunks
+  // If we have chunks but no blob, create a blob from chunks
   if (recordedChunks.length > 0) {
-    console.log('Creating new blob from', recordedChunks.length, 'chunks');
-    
-    // Check the MIME type of the first chunk (they should all be the same)
-    let mimeType = 'audio/webm';
-    
-    if (recordedChunks[0] && recordedChunks[0].type) {
-      mimeType = recordedChunks[0].type;
-      console.log('Using MIME type from chunks:', mimeType);
-    }
-    
-    // Try to ensure high-quality audio with proper metadata
     try {
-      // If we have multiple chunks, we want to properly concatenate them
-      if (recordedChunks.length > 1 && typeof MediaRecorder !== 'undefined') {
-        // The correct MIME type is critical for proper playback
-        const blob = new Blob(recordedChunks, { type: mimeType });
-        
-        if (blob.size > 0) {
-    lastRecordedBlob = blob; // Cache for future calls
-          console.log('Created and cached blob from multiple chunks, size:', blob.size, 'type:', blob.type);
-    return blob;
-        } else {
-          console.warn('Created blob is empty, trying with WAV type');
-          const wavBlob = new Blob(recordedChunks, { type: 'audio/wav' });
-          
-          if (wavBlob.size > 0) {
-            lastRecordedBlob = wavBlob;
-            console.log('Created WAV blob successfully, size:', wavBlob.size);
-            return wavBlob;
-          } else {
-            console.warn('WAV blob is also empty, creating a fallback silent audio');
-          }
-        }
-      } else if (recordedChunks.length === 1) {
-        // If we only have one chunk, check if it's valid
-        if (recordedChunks[0].size > 0) {
-          lastRecordedBlob = recordedChunks[0];
-          console.log('Using single chunk as blob, size:', lastRecordedBlob.size, 'type:', lastRecordedBlob.type);
-          return lastRecordedBlob;
-        } else {
-          console.warn('Single chunk is empty, creating fallback');
-        }
-      }
+      // Use the type of the first chunk for consistency
+      const mimeType = recordedChunks[0]?.type || 'audio/webm';
+      const blob = new Blob(recordedChunks, { type: mimeType });
       
-      // If we reached here, we need to create a fallback
-      console.log('Creating a fallback silent audio recording');
-      const sampleRate = 44100;
-      const duration = 1; // 1 second of silence
-      const numSamples = sampleRate * duration;
-      const silentBuffer = new Float32Array(numSamples);
+      console.log('Created blob from recorded chunks:', {
+        chunks: recordedChunks.length,
+        totalSize: recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0),
+        blobSize: blob.size,
+        blobType: blob.type
+      });
       
-      // Fill with silence (all zeros)
-      for (let i = 0; i < numSamples; i++) {
-        silentBuffer[i] = 0;
-      }
+      // Store for future use
+      lastRecordedBlob = blob;
       
-      // Convert to WAV
-      const fallbackBlob = convertToWav(silentBuffer, sampleRate);
-      lastRecordedBlob = fallbackBlob;
-      console.log('Created fallback silent audio blob, size:', fallbackBlob.size);
-      return fallbackBlob;
+      return blob;
     } catch (error) {
-      console.error('Error creating audio blob:', error);
-      
-      // Generate a silent recording as absolute fallback
-      try {
-        const sampleRate = 44100;
-        const duration = 1; // 1 second
-        const numSamples = sampleRate * duration;
-        const silentBuffer = new Float32Array(numSamples);
-        
-        // Convert to WAV for maximum compatibility
-        const fallbackBlob = convertToWav(silentBuffer, sampleRate);
-        lastRecordedBlob = fallbackBlob;
-        console.log('Created silent fallback blob after error, size:', fallbackBlob.size);
-        return fallbackBlob;
-      } catch (fallbackError) {
-        console.error('Critical error: Failed to create fallback audio:', fallbackError);
-        // Create the absolute simplest blob as last resort
-        const emptyBlob = new Blob([new Uint8Array(100)], { type: 'audio/wav' });
-        lastRecordedBlob = emptyBlob;
-        return emptyBlob;
-      }
+      console.error('Error creating blob from chunks:', error);
+      return null;
     }
   }
   
-  // No chunks available, create a silent recording
-  console.warn('No recorded audio available, creating silent recording');
-  try {
-    const sampleRate = 44100;
-    const duration = 1; // 1 second
-    const numSamples = sampleRate * duration;
-    const silentBuffer = new Float32Array(numSamples);
-    
-    // Convert to WAV for maximum compatibility
-    const silentBlob = convertToWav(silentBuffer, sampleRate);
-    lastRecordedBlob = silentBlob;
-    console.log('Created silent recording as no audio was available, size:', silentBlob.size);
-    return silentBlob;
-  } catch (error) {
-    console.error('Failed to create silent recording:', error);
-    
-    // Last resort - create a minimal audio blob
-    const minimalBlob = new Blob([new Uint8Array(100)], { type: 'audio/wav' });
-    lastRecordedBlob = minimalBlob;
-    return minimalBlob;
-  }
+  console.log('No recorded audio available');
+  return null;
 };
 
 /**
