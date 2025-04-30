@@ -56,13 +56,6 @@ export const ensureDatabaseSetup = async (): Promise<boolean> => {
         // Try to create each policy
         for (const policy of recordingsPolicies) {
           try {
-            // Use raw SQL with Supabase
-            const sqlQuery = `
-              CREATE POLICY IF NOT EXISTS "${policy.name}" 
-              ON public.recordings FOR ${policy.operation} 
-              TO anon USING (${policy.definition})
-            `;
-            
             try {
               const { error: policyError } = await supabase.rpc('create_policy_if_not_exists', { 
                 table_name: 'recordings',
