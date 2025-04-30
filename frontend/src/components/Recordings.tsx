@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Paper, Typography, Box, List, ListItem, ListItemText, IconButton, Divider, Button, CircularProgress } from '@mui/material';
+import { Paper, Typography, Box, List, ListItem, ListItemText, IconButton, Divider, Button, CircularProgress, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, alpha } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { fetchRecordings, deleteRecording as apiDeleteRecording, Recording as DBRecording } from '../services/recordingsService';
 
 interface RecordingsProps {
@@ -16,6 +18,10 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [recordingToDelete, setRecordingToDelete] = useState<number | null>(null);
+  const [deleteInProgress, setDeleteInProgress] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Load recordings from API
   const loadRecordings = async () => {
@@ -128,25 +134,47 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
     }
   };
 
-  // Delete recording
-  const deleteRecording = async (id: number) => {
+  // Open delete confirmation dialog
+  const openDeleteConfirmation = (id: number) => {
+    setRecordingToDelete(id);
+    setDeleteConfirmOpen(true);
+  };
+
+  // Close delete confirmation dialog
+  const closeDeleteConfirmation = () => {
+    setDeleteConfirmOpen(false);
+    setRecordingToDelete(null);
+  };
+
+  // Delete recording after confirmation
+  const confirmDeleteRecording = async () => {
+    if (recordingToDelete === null) return;
+    
+    setDeleteInProgress(true);
+    setDeleteError(null);
+    
     // Stop playback if this recording is playing
-    if (playingId === id && audioElement) {
+    if (playingId === recordingToDelete && audioElement) {
       audioElement.pause();
       setPlayingId(null);
     }
 
     try {
-      const success = await apiDeleteRecording(id);
+      const success = await apiDeleteRecording(recordingToDelete);
       if (success) {
         // Remove from state
-        setRecordings(prev => prev.filter(rec => rec.id !== id));
+        setRecordings(prev => prev.filter(rec => rec.id !== recordingToDelete));
+        setDeleteConfirmOpen(false);
+        setRecordingToDelete(null);
       } else {
-        setError("Failed to delete recording");
+        setDeleteError("Failed to delete recording from server");
       }
     } catch (err) {
       console.error(err);
-      setError("Failed to delete recording");
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setDeleteError(`Failed to delete: ${errorMessage}`);
+    } finally {
+      setDeleteInProgress(false);
     }
   };
 
@@ -203,6 +231,12 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  // Get recording filename by ID
+  const getRecordingName = (id: number): string => {
+    const recording = recordings.find(rec => rec.id === id);
+    return recording ? recording.file_name : 'Recording';
+  };
+
   return (
     <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -251,7 +285,7 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
                     <IconButton edge="end" aria-label="download" onClick={() => downloadRecording(recording)}>
                       <DownloadIcon />
                     </IconButton>
-                    <IconButton edge="end" aria-label="delete" onClick={() => deleteRecording(recording.id)}>
+                    <IconButton edge="end" aria-label="delete" onClick={() => openDeleteConfirmation(recording.id)}>
                       <DeleteIcon />
                     </IconButton>
                   </Box>
@@ -298,6 +332,103 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
           </Typography>
         </Box>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={!deleteInProgress ? closeDeleteConfirmation : undefined}
+        aria-labelledby="delete-dialog-title"
+        aria-describedby="delete-dialog-description"
+        PaperProps={{
+          sx: {
+            bgcolor: '#1E293B',
+            backgroundImage: 'none',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '16px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            maxWidth: { xs: '90%', sm: '450px' }
+          }
+        }}
+      >
+        <DialogTitle id="delete-dialog-title" sx={{ pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          {deleteError ? (
+            <>
+              <ErrorOutlineIcon color="error" sx={{ fontSize: { xs: 20, sm: 24 } }} />
+              Error
+            </>
+          ) : (
+            <>
+              <WarningAmberIcon color="warning" sx={{ fontSize: { xs: 20, sm: 24 } }} />
+              Delete Recording
+            </>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          {deleteError ? (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="body1" color="error" sx={{ mb: 2 }}>
+                {deleteError}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Please try again later or check your network connection.
+              </Typography>
+            </Box>
+          ) : (
+            <Box>
+              <DialogContentText id="delete-dialog-description" sx={{ color: 'text.secondary' }}>
+                Are you sure you want to delete "{getRecordingName(recordingToDelete || 0)}"?
+              </DialogContentText>
+              <Box sx={{ 
+                mt: 2, 
+                p: 1.5, 
+                borderRadius: 1, 
+                bgcolor: alpha('#DC2626', 0.1), 
+                border: '1px solid ' + alpha('#DC2626', 0.2) 
+              }}>
+                <Typography variant="body2" sx={{ color: alpha('#fff', 0.8), fontSize: { xs: '0.8rem', sm: '0.9rem' } }}>
+                  This action cannot be undone and will permanently remove the recording from your account.
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3, flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 1, sm: 0 } }}>
+          <Button 
+            onClick={closeDeleteConfirmation} 
+            color="primary"
+            sx={{ 
+              borderRadius: '12px',
+              px: { xs: 2, md: 3 },
+              width: { xs: '100%', sm: 'auto' }
+            }}
+            disabled={deleteInProgress}
+          >
+            {deleteError ? 'Close' : 'Cancel'}
+          </Button>
+          {!deleteError && (
+            <Button 
+              onClick={confirmDeleteRecording} 
+              color="error" 
+              variant="contained"
+              autoFocus
+              disabled={deleteInProgress}
+              sx={{ 
+                borderRadius: '12px',
+                background: 'linear-gradient(90deg, #DC2626 0%, #EF4444 100%)',
+                px: { xs: 2, md: 3 },
+                width: { xs: '100%', sm: 'auto' }
+              }}
+            >
+              {deleteInProgress ? (
+                <>
+                  <CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />
+                  Deleting...
+                </>
+              ) : 'Delete'}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
     </Paper>
   );
 };

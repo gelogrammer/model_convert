@@ -1,16 +1,112 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
+  color-scheme: dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  background-color: #0F172A;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+/* Mobile-first responsive sizing */
+html {
+  font-size: 16px;
+}
+
+@media (max-width: 600px) {
+  html {
+    font-size: 14px;
+  }
+}
+
+/* Fix for iOS height issues */
+@supports (-webkit-touch-callout: none) {
+  body, html {
+    height: -webkit-fill-available;
+  }
+  .App {
+    min-height: -webkit-fill-available !important;
+  }
+}
+
+/* Prevent content shift on mobile when scrollbars appear */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+
+body::-webkit-scrollbar {
+  width: 8px;
+}
+
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+body::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 4px;
+}
+
+/* Improve mobile touch targets */
+button, 
+a,
+[role="button"],
+input,
+label,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+/* Optimizations for small screens */
+@media (max-width: 600px) {
+  /* Tighten up spacing */
+  .MuiContainer-root {
+    padding: 0 8px !important;
+  }
+  
+  /* Prevent text overflow */
+  .MuiTypography-root {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    hyphens: auto;
+  }
+  
+  /* Better buttons for touch */
+  .MuiButton-root {
+    min-height: 48px;
+  }
+  
+  /* Canvas responsiveness */
+  canvas {
+    max-width: 100%;
+    height: auto !important;
+  }
+}
+
+/* Fix for overscroll bounce effect */
+html {
+  overscroll-behavior: none;
+}
+
+/* Prevent pull-to-refresh on mobile */
+body {
+  overscroll-behavior-y: contain;
 }
 
 a {
@@ -23,7 +119,6 @@ a:hover {
 }
 
 body {
-  margin: 0;
   display: flex;
   place-items: center;
   min-width: 320px;
@@ -65,4 +160,80 @@ button:focus-visible {
   button {
     background-color: #f9f9f9;
   }
+}
+
+/* Dark mode visualization fix */
+canvas {
+  background-color: #1E293B !important;
+}
+
+/* Fix nested Paper components */
+.MuiPaper-root {
+  background-color: #1E293B !important;
+  color: #F1F5F9 !important;
+}
+
+/* Fix mobile view */
+@media (max-width: 600px) {
+  .MuiPaper-root {
+    padding: 12px !important;
+  }
+  
+  .MuiContainer-root {
+    padding: 0 8px !important;
+  }
+  
+  .MuiToolbar-root {
+    min-height: 64px !important;
+    padding: 0 8px !important;
+  }
+  
+  .MuiToolbar-root .MuiTypography-root {
+    margin: 0;
+    padding: 0;
+  }
+}
+
+/* Force dark mode */
+:root {
+  color-scheme: dark !important;
+}
+
+/* Fix START CAPTURE button visibility */
+.MuiButton-containedPrimary, .MuiButton-containedError {
+  position: relative;
+  z-index: 10;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Make sure the button is visible in all cases */
+.MuiContainer-root > .MuiBox-root:first-of-type {
+  margin-top: 20px;
+  position: relative;
+  z-index: 1000;
+}
+
+/* Enhance button visibility on mobile */
+@media (max-width: 600px) {
+  .MuiButton-containedPrimary, .MuiButton-containedError {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  }
+  
+  .MuiContainer-root > div > .MuiBox-root:first-of-type {
+    margin-top: 25px !important;
+    padding-top: 5px;
+  }
+  
+  /* Fix AppBar covering content */
+  .MuiContainer-root {
+    padding-top: 75px !important;
+  }
+}
+
+/* Fix for flexbox centering issues */
+body {
+  display: block !important;
+  min-width: 320px;
+  min-height: 100vh;
 }

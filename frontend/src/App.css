@@ -1,10 +1,57 @@
 #root {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 0;
   text-align: center;
+  width: 100%;
 }
 
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Responsive containers */
+.container {
+  width: 100%;
+  padding-right: 15px;
+  padding-left: 15px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+/* Responsive text sizing */
+@media (max-width: 576px) {
+  h5, h6 {
+    font-size: 1rem !important;
+  }
+  body {
+    font-size: 0.9rem !important;
+  }
+  .MuiButton-root {
+    font-size: 0.9rem !important;
+  }
+  .MuiTypography-body2 {
+    font-size: 0.8rem !important;
+  }
+}
+
+/* Better canvas responsiveness */
+canvas {
+  max-width: 100%;
+  height: auto !important;
+}
+
+/* Responsive Paper components */
+.MuiPaper-root {
+  overflow: hidden;
+  word-wrap: break-word;
+}
+
+/* Preserve legacy styles */
 .logo {
   height: 6em;
   padding: 1.5em;

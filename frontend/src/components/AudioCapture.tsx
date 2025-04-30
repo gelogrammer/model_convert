@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Paper, Typography, Box, CircularProgress, Chip } from '@mui/material';
+import { Typography, Box, CircularProgress, Chip } from '@mui/material';
 import { initializeAudioCapture, startAudioCapture, stopAudioCapture, cleanupAudio, getAudioVisualizationData } from '../services/audioService';
 
 interface AudioCaptureProps {
@@ -101,8 +101,8 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
         }, 1000);
       }
       
-      // Clear canvas
-      ctx.fillStyle = '#f7f9fc';
+      // Clear canvas with dark background
+      ctx.fillStyle = '#1E293B';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
       // Draw visualization
@@ -112,13 +112,14 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
       for (let i = 0; i < dataArray.length; i++) {
         const barHeight = (dataArray[i] / 255) * canvas.height;
         
-        // Use gradient based on frequency
-        const hue = i / dataArray.length * 360;
-        const saturation = 80; // More vibrant colors
-        const lightness = 65; // Brighter colors
-        
-        // Create a gradient effect
+        // Create a gradient effect with colors that work well on dark background
         const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+        
+        // Use themed colors
+        const hue = i / dataArray.length * 360;
+        const saturation = 80; 
+        const lightness = 65;
+        
         gradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, 0.8)`);
         gradient.addColorStop(1, `hsla(${hue}, ${saturation}%, ${lightness + 10}%, 0.6)`);
         
@@ -159,16 +160,16 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d');
       if (ctx) {
-        ctx.fillStyle = '#f7f9fc';
+        ctx.fillStyle = '#1E293B'; // Dark theme background
         ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
       }
     }
   };
 
   return (
-    <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6">
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: { xs: 1, md: 2 } }}>
+        <Typography variant="h6" sx={{ fontSize: { xs: '1rem', md: '1.1rem' } }}>
           Audio Capture
         </Typography>
         
@@ -179,6 +180,8 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
             size="small"
             sx={{ 
               fontWeight: 500,
+              fontSize: { xs: '0.65rem', md: '0.75rem' },
+              height: { xs: 22, md: 24 },
               animation: isSpeaking ? 'pulse 1.5s infinite' : 'none',
               '@keyframes pulse': {
                 '0%': { opacity: 0.7 },
@@ -191,24 +194,24 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
       </Box>
       
       {error ? (
-        <Typography color="error">{error}</Typography>
+        <Typography color="error" sx={{ fontSize: { xs: '0.8rem', md: '0.9rem' } }}>{error}</Typography>
       ) : (
         <>
           <Box sx={{ 
             display: 'flex', 
             justifyContent: 'space-between',
             alignItems: 'center',
-            mb: 2 
+            mb: { xs: 1, md: 2 }
           }}>
-            <Typography variant="body2">
+            <Typography variant="body2" sx={{ fontSize: { xs: '0.75rem', md: '0.85rem' } }}>
               {isCapturing ? (isSpeaking ? 'Speech detected' : 'No speech detected') : 'Click Start Capturing to begin'}
             </Typography>
             
             {isCapturing && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Box sx={{
-                  width: 8,
-                  height: 8,
+                  width: { xs: 6, md: 8 },
+                  height: { xs: 6, md: 8 },
                   borderRadius: '50%',
                   bgcolor: isSpeaking ? 'success.main' : '#aaa',
                   boxShadow: isSpeaking ? '0 0 10px rgba(76, 175, 80, 0.5)' : 'none',
@@ -219,7 +222,7 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
                     '100%': { opacity: 0.5 }
                   }
                 }} />
-                <Typography variant="body2" color={isSpeaking ? 'success.main' : 'text.secondary'} fontWeight={isSpeaking ? 500 : 400}>
+                <Typography variant="body2" color={isSpeaking ? 'success.main' : 'text.secondary'} fontWeight={isSpeaking ? 500 : 400} sx={{ fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
                   {isSpeaking ? 'Live' : 'Idle'}
                 </Typography>
               </Box>
@@ -227,71 +230,80 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({ isCapturing, isConnected })
           </Box>
           
           <Box sx={{ 
-            mt: 2, 
-            bgcolor: '#f7f9fc', 
+            mt: { xs: 1, md: 2 }, 
+            bgcolor: '#1E293B', // Dark theme background 
             borderRadius: '12px', 
             overflow: 'hidden',
             position: 'relative',
-            border: isCapturing ? '1px solid rgba(63, 81, 181, 0.2)' : '1px solid rgba(0, 0, 0, 0.08)',
-            boxShadow: isCapturing ? 'inset 0 2px 4px rgba(0, 0, 0, 0.05)' : 'none',
+            border: isCapturing ? '1px solid rgba(124, 58, 237, 0.2)' : '1px solid rgba(255, 255, 255, 0.08)',
+            boxShadow: isCapturing ? 'inset 0 2px 4px rgba(0, 0, 0, 0.2)' : 'none',
             flexGrow: 1,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center'
+            justifyContent: 'center',
+            minHeight: { xs: 120, sm: 150, md: 200 },
           }}>
             <canvas 
               ref={canvasRef} 
               width={500} 
               height={200} 
-              style={{ width: '100%', height: '100%', display: 'block' }}
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                display: 'block',
+                maxHeight: '100%'
+              }}
             />
             
             {!isCapturing && !isInitialized && (
               <Box sx={{ 
-                position: 'absolute', 
-                top: 0, 
-                left: 0, 
-                right: 0, 
-                bottom: 0, 
-                display: 'flex', 
-                justifyContent: 'center', 
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: 'flex',
                 alignItems: 'center',
-                bgcolor: 'rgba(255, 255, 255, 0.7)' 
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0, 0, 0, 0.2)'
               }}>
-                <CircularProgress size={40} color="primary" />
+                <CircularProgress size={30} />
               </Box>
             )}
           </Box>
           
-          {/* Audio level indicator */}
-          {isCapturing && (
-            <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" sx={{ minWidth: 65 }} color="text.secondary">
-                Audio level:
-              </Typography>
+          <Box sx={{ 
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: 1,
+            mt: { xs: 1, md: 2 }
+          }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: { xs: '0.65rem', md: '0.75rem' } }}>
+              Audio level:
+            </Typography>
+            <Box sx={{ 
+              bgcolor: 'rgba(255,255,255,0.1)',
+              width: { xs: 60, md: 100 },
+              height: { xs: 6, md: 8 },
+              borderRadius: 1,
+              overflow: 'hidden',
+              position: 'relative'
+            }}>
               <Box sx={{ 
-                flex: 1,
-                height: 8, 
-                bgcolor: 'rgba(0, 0, 0, 0.08)',
-                borderRadius: 4,
-                overflow: 'hidden'
-              }}>
-                <Box sx={{ 
-                  height: '100%', 
-                  width: `${audioLevel * 100}%`, 
-                  bgcolor: isSpeaking ? 'success.main' : 'primary.main',
-                  transition: 'width 0.1s ease-out', 
-                  borderRadius: 4,
-                  background: isSpeaking 
-                    ? 'linear-gradient(90deg, #4caf50 0%, #8bc34a 100%)' 
-                    : 'linear-gradient(90deg, #3f51b5 0%, #2196f3 100%)'
-                }} />
-              </Box>
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${audioLevel * 100}%`,
+                bgcolor: isSpeaking ? 'success.main' : 'primary.main',
+                transition: 'width 0.2s ease-out'
+              }} />
             </Box>
-          )}
+          </Box>
         </>
       )}
-    </Paper>
+    </Box>
   );
 };
 

@@ -44,14 +44,32 @@ const theme = createTheme({
     h6: {
       fontWeight: 700,
       letterSpacing: '0.02em',
+      fontSize: '1.1rem',
+      '@media (max-width:600px)': {
+        fontSize: '1rem',
+      },
     },
     h5: {
       fontWeight: 700,
       letterSpacing: '0.02em',
+      fontSize: '1.5rem',
+      '@media (max-width:600px)': {
+        fontSize: '1.2rem',
+      },
     },
     button: {
       fontWeight: 600,
-    }
+    },
+    body1: {
+      '@media (max-width:600px)': {
+        fontSize: '0.9rem',
+      },
+    },
+    body2: {
+      '@media (max-width:600px)': {
+        fontSize: '0.8rem',
+      },
+    },
   },
   shape: {
     borderRadius: 16
@@ -75,6 +93,9 @@ const theme = createTheme({
           fontWeight: 600,
           borderRadius: 12,
           padding: '12px 28px',
+          '@media (max-width:600px)': {
+            padding: '8px 16px',
+          },
           transition: '0.3s',
           '&:hover': {
             transform: 'translateY(-2px)',
@@ -102,6 +123,19 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           height: 80,
+          '@media (max-width:600px)': {
+            height: 64,
+            padding: '0 8px',
+          },
+        }
+      }
+    },
+    MuiContainer: {
+      styleOverrides: {
+        root: {
+          '@media (max-width:600px)': {
+            padding: '0 12px',
+          },
         }
       }
     },
@@ -564,21 +598,21 @@ function App() {
       <CssBaseline />
       <div className="App" style={{ minHeight: '100vh', backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.05) 0%, rgba(6, 182, 212, 0.05) 90%)' }}>
         <AppBar position="fixed" elevation={0}>
-          <Toolbar>
+          <Toolbar sx={{ height: { xs: 64, md: 80 }, px: { xs: 1, md: 2 } }}>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <Box 
                 sx={{ 
-                  width: 40, 
-                  height: 40, 
-                  borderRadius: '12px', 
+                  width: { xs: 32, md: 40 }, 
+                  height: { xs: 32, md: 40 }, 
+                  borderRadius: { xs: '8px', md: '12px' }, 
                   background: 'linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  mr: 2
+                  mr: { xs: 1, md: 2 }
                 }}
               >
-                <Typography variant="h6" sx={{ color: 'white' }}>RT</Typography>
+                <Typography variant="h6" sx={{ color: 'white', fontSize: { xs: '0.8rem', md: '1rem' }, m: 0, p: 0 }}>RT</Typography>
               </Box>
               <Typography 
                 variant="h5" 
@@ -600,14 +634,14 @@ function App() {
             <Box sx={{ flexGrow: 1 }} />
             
             {/* Connection status indicator */}
-            <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mr: { xs: 0.5, md: 2 } }}>
               <Badge
                 color={isConnected ? "success" : "error"}
                 variant="dot"
                 sx={{ 
                   '& .MuiBadge-badge': { 
-                    width: 12, 
-                    height: 12,
+                    width: { xs: 8, md: 12 }, 
+                    height: { xs: 8, md: 12 },
                     borderRadius: '50%',
                     animation: isConnected && processingPacket ? 'pulse 1s infinite' : 'none',
                     '@keyframes pulse': {
@@ -621,14 +655,15 @@ function App() {
                 <Box sx={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  py: 0.75, 
-                  px: 2, 
+                  py: { xs: 0.4, md: 0.75 }, 
+                  px: { xs: 1, md: 2 }, 
                   borderRadius: '8px',
                   backgroundColor: isConnected ? alpha(theme.palette.success.main, 0.1) : alpha(theme.palette.error.main, 0.1)
                 }}>
                   <Typography variant="body2" sx={{ 
                     color: isConnected ? theme.palette.success.main : theme.palette.error.main,
                     fontWeight: 600,
+                    fontSize: { xs: '0.65rem', md: '0.8rem' }
                   }}>
                     {isConnected ? 'Connected' : 'Disconnected'}
                   </Typography>
@@ -636,7 +671,7 @@ function App() {
               </Badge>
             </Box>
             
-            {/* Last update time */}
+            {/* Last update time - hidden on mobile */}
             {lastUpdateTime && (
               <Box sx={{ 
                 backgroundColor: alpha(theme.palette.background.paper, 0.3),
@@ -669,8 +704,8 @@ function App() {
             }}
           >
             {reconnectAttempt > 0 
-              ? `Reconnecting to server... (Attempt ${reconnectAttempt})` 
-              : 'Connection lost. Reconnecting...'
+              ? `Reconnecting... (${reconnectAttempt})` 
+              : 'Connection lost'
             }
           </Alert>
         </Snackbar>
@@ -693,13 +728,19 @@ function App() {
             }}
           >
             {saveSuccess 
-              ? 'Recording saved successfully!' 
-              : 'Failed to save recording. Please try again.'
+              ? 'Recording saved!' 
+              : 'Failed to save'
             }
           </Alert>
         </Snackbar>
 
-        <Container maxWidth="lg" sx={{ pt: 12, pb: 6 }}>
+        <Container disableGutters maxWidth="lg" sx={{ 
+          pt: { xs: 10, sm: 12, md: 12 }, 
+          pb: { xs: 4, md: 6 }, 
+          px: { xs: 1, sm: 2, md: 4 },
+          position: 'relative',
+          zIndex: 1
+        }}>
           {loading ? (
             <Box sx={{ 
               display: 'flex', 
@@ -719,7 +760,7 @@ function App() {
             </Box>
           ) : error ? (
             <Paper sx={{ 
-              p: 4, 
+              p: { xs: 2, md: 4 }, 
               textAlign: 'center', 
               backgroundColor: alpha(theme.palette.error.main, 0.1),
               borderRadius: theme.shape.borderRadius,
@@ -737,7 +778,15 @@ function App() {
             </Paper>
           ) : (
             <>
-              <Box sx={{ mb: 5, mt: 2, display: 'flex', justifyContent: 'center' }}>
+              <Box sx={{ 
+                mb: { xs: 3, md: 5 }, 
+                mt: { xs: 4, md: 4 }, 
+                display: 'flex', 
+                justifyContent: 'center', 
+                position: 'relative',
+                zIndex: 1000,
+                width: '100%'
+              }}>
                 <Button
                   variant="contained"
                   color={isCapturing ? "error" : "primary"}
@@ -745,11 +794,15 @@ function App() {
                   onClick={toggleCapturing}
                   size="large"
                   sx={{ 
-                    px: 4, 
-                    py: 2, 
-                    fontSize: '1.1rem',
+                    px: { xs: 2, md: 4 }, 
+                    py: { xs: 1.2, md: 2 }, 
+                    fontSize: { xs: '0.9rem', md: '1.1rem' },
                     position: 'relative',
+                    minWidth: { xs: '80%', sm: '60%', md: 'auto' },
                     overflow: 'hidden',
+                    zIndex: 1000,
+                    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.5)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
                     '&::before': isCapturing ? {} : {
                       content: '""',
                       position: 'absolute',
@@ -773,69 +826,71 @@ function App() {
 
               <Box sx={{ 
                 display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, 
-                gap: 4,
-                mb: 4
+                gridTemplateColumns: { xs: '1fr', sm: '1fr', lg: '1fr 1fr' }, 
+                gap: { xs: 2, md: 4 },
+                mb: { xs: 2, md: 4 }
               }}>
-                <Box>
+                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <AudioCapture
                     isCapturing={isCapturing}
                     isConnected={isConnected}
                   />
-                </Box>
-                <Box>
+                </Paper>
+                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <EmotionDisplay
                     emotionResult={isCapturing && isSpeaking ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
-                </Box>
+                </Paper>
               </Box>
 
               <Box sx={{ 
                 display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, 
-                gap: 4,
-                mb: 4
+                gridTemplateColumns: { xs: '1fr', sm: '1fr', lg: '1fr 1fr' }, 
+                gap: { xs: 2, md: 4 },
+                mb: { xs: 2, md: 4 }
               }}>
-                <Box>
+                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <SpeechTempoDisplay
                     speechRate={isCapturing && isSpeaking ? emotionResult?.speech_rate : undefined}
                     isCapturing={isCapturing}
                   />
-                </Box>
-                <Box>
+                </Paper>
+                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <EmotionCalibration
                     emotionResult={isCapturing && isSpeaking ? emotionResult : null}
                     isCapturing={isCapturing}
                     onCalibrationUpdate={handleCalibrationUpdate}
                   />
-                </Box>
+                </Paper>
               </Box>
               
               <Box sx={{ 
                 display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, 
-                gap: 4,
-                mb: 4
+                gridTemplateColumns: { xs: '1fr', sm: '1fr', lg: '1fr 1fr' }, 
+                gap: { xs: 2, md: 4 },
+                mb: { xs: 2, md: 4 }
               }}>
-                <Box>
-                  {emotionResult?.speech_characteristics && isCapturing && (
+                {emotionResult?.speech_characteristics && isCapturing && (
+                  <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                     <SpeechCharacteristics
                       characteristics={formatSpeechCharacteristics(emotionResult.speech_characteristics)}
                       isCapturing={isCapturing}
                     />
-                  )}
-                </Box>
-                <Box>
+                  </Paper>
+                )}
+                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <Feedback
                     emotionResult={isCapturing && isSpeaking ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
-                </Box>
+                </Paper>
               </Box>
               
-              <Box sx={{ mb: 4 }}>
-                <Recordings isCapturing={isCapturing} />
+              <Box sx={{ mb: { xs: 2, md: 4 } }}>
+                <Paper sx={{ p: { xs: 2, md: 3 } }}>
+                  <Recordings isCapturing={isCapturing} />
+                </Paper>
               </Box>
             </>
           )}
@@ -845,13 +900,13 @@ function App() {
         <Box 
           component="footer" 
           sx={{ 
-            py: 3, 
+            py: { xs: 1.5, md: 3 }, 
             textAlign: 'center', 
             borderTop: '1px solid rgba(255, 255, 255, 0.05)',
             mt: 'auto'
           }}
         >
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', md: '0.8rem' } }}>
             Real-Time Speech Analysis • Powered by AI
           </Typography>
         </Box>
