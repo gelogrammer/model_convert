@@ -53,78 +53,57 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
     // Ensure we have valid emotion data
     const sanitizedEmotionData = emotionData || {};
     
+    // First try to save to Supabase
+    let supabaseSuccess = false;
+    
     try {
-      // Try Supabase first
       console.log('Attempting to save to Supabase...');
-      console.log('Audio blob type:', recordedBlob.type);
-      console.log('Audio blob size:', recordedBlob.size, 'bytes');
       
-      // First check if we can access the bucket
-      const { supabase } = await import('./supabaseService');
-      try {
-        const { error: bucketError } = await supabase.storage.getBucket('recordings');
-        if (bucketError) {
-          console.error('Storage bucket access error:', bucketError);
-          console.log('Will attempt upload anyway, bucket might still be accessible');
-        } else {
-          console.log('Storage bucket is accessible');
+      // Try Supabase with timeout in case of API issues
+      const supabasePromise = new Promise<boolean>(async (resolve) => {
+        try {
+          const { error } = await uploadRecording(recordedBlob, fileName, {
+            duration,
+            emotionData: sanitizedEmotionData
+          });
+          
+          if (error) {
+            console.error('Supabase upload error:', error);
+            resolve(false);
+          } else {
+            console.log('Successfully saved to Supabase');
+            resolve(true);
+          }
+        } catch (error) {
+          console.error('Error during Supabase upload:', error);
+          resolve(false);
         }
-      } catch (bucketCheckError) {
-        console.warn('Error checking bucket access:', bucketCheckError);
-      }
-      
-      // Create a small test blob to verify the upload functionality
-      const testBlob = new Blob(['test'], { type: 'text/plain' });
-      const testResult = await supabase.storage
-        .from('recordings')
-        .upload('test_upload.txt', testBlob, { upsert: true });
-      
-      if (testResult.error) {
-        console.warn('Test upload failed:', testResult.error);
-      } else {
-        console.log('Test upload succeeded:', testResult.data);
-      }
-      
-      // Now attempt the upload
-      const { error } = await uploadRecording(recordedBlob, fileName, {
-        duration,
-        emotionData: sanitizedEmotionData
       });
       
-      if (error) {
-        console.error('Supabase upload error:', error);
-        
-        // Detailed error logging
-        if (error.message) {
-          if (error.message.includes('storage bucket')) {
-            console.error('Storage bucket issue. Please make sure the recordings bucket exists.');
-          } else if (error.message.includes('Database insert failed')) {
-            console.error('Database insert issue. Please check table schema matches the insert operation.');
-          } else if (error.message.includes('row-level security policy')) {
-            console.error('RLS policy error. Check anonymous access is enabled for the table and bucket.');
-          }
-        }
-        
-        throw new Error(`Supabase upload failed: ${error.message || 'Unknown error'}`);
-      }
+      // Add a timeout to prevent hanging if Supabase is unresponsive
+      const timeoutPromise = new Promise<boolean>((resolve) => {
+        setTimeout(() => {
+          console.warn('Supabase upload timed out after 5 seconds');
+          resolve(false);
+        }, 5000);
+      });
       
-      console.log('Successfully saved to Supabase');
-      return true;
+      // Race the Supabase upload against the timeout
+      supabaseSuccess = await Promise.race([supabasePromise, timeoutPromise]);
     } catch (supabaseError) {
-      console.error('Error saving to Supabase, falling back to localStorage:', supabaseError);
+      console.error('Error saving to Supabase:', supabaseError);
+      supabaseSuccess = false;
+    }
+    
+    // If Supabase failed, fall back to localStorage
+    if (!supabaseSuccess) {
+      console.log('Supabase upload failed or timed out, falling back to localStorage');
       
-      // Check if localStorage is available
-      if (typeof localStorage === 'undefined') {
-        console.error('localStorage is not available in this environment');
-        throw new Error('Cannot save recording: localStorage not available');
-      }
-      
-      // Fallback to localStorage
       try {
         const objectUrl = URL.createObjectURL(recordedBlob);
         
         // Create a recording object for localStorage
-        const localRecording: LocalRecording = {
+        const localRecording = {
           id: `local_${Date.now()}`,
           name: fileName,
           date: new Date().toISOString(),
@@ -135,7 +114,7 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
         
         // Get existing recordings from localStorage
         const existingRecordingsStr = localStorage.getItem('audioRecordings');
-        const existingRecordings: LocalRecording[] = existingRecordingsStr ? JSON.parse(existingRecordingsStr) : [];
+        const existingRecordings = existingRecordingsStr ? JSON.parse(existingRecordingsStr) : [];
         
         // Add new recording and save to localStorage
         localStorage.setItem('audioRecordings', JSON.stringify([localRecording, ...existingRecordings]));
@@ -144,9 +123,11 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
         return true;
       } catch (localStorageError) {
         console.error('Error saving to localStorage:', localStorageError);
-        throw localStorageError; 
+        return false;
       }
     }
+    
+    return supabaseSuccess;
   } catch (error) {
     console.error('Error saving recording:', error);
     return false;

@@ -7,7 +7,7 @@ import Feedback from './components/Feedback';
 import SpeechCharacteristics from './components/SpeechCharacteristics';
 import EmotionCalibration from './components/EmotionCalibration';
 import Recordings from './components/Recordings';
-import { initializeWebSocket, closeWebSocket } from './services/websocket';
+import { initializeWebSocket, closeWebSocket, setAudioProcessingEnabled } from './services/websocket';
 import { saveRecordingToDatabase } from './services/recordingsService';
 import './App.css';
 
@@ -234,6 +234,9 @@ function App() {
             setError(null);
             setShowReconnecting(false);
             setReconnectAttempt(0);
+            
+            // Make sure audio processing is disabled initially
+            setAudioProcessingEnabled(false);
           },
           onDisconnect: () => {
             setIsConnected(false);
@@ -247,6 +250,9 @@ function App() {
             setIsConnected(true);
             setShowReconnecting(false);
             setReconnectAttempt(0);
+            
+            // Make sure audio processing is disabled on reconnect
+            setAudioProcessingEnabled(false);
           },
           onEmotionResult: (result) => {
             setEmotionResult(result);
@@ -355,6 +361,9 @@ function App() {
         speechTimeoutRef.current = null;
       }
       
+      // Disable audio processing
+      setAudioProcessingEnabled(false);
+      
       // Stop the audio capture to finalize recording
       try {
         // Import needed functions
@@ -436,6 +445,9 @@ function App() {
           return;
         }
         
+        // Enable audio processing
+        setAudioProcessingEnabled(true);
+        
         setLoading(false);
         setIsCapturing(true);
       } catch (error) {
@@ -462,12 +474,12 @@ function App() {
       const success = await saveRecordingToDatabase(emotionResult);
       
       if (success) {
-        console.log('Recording saved successfully');
+        console.log('Recording saved successfully (either to Supabase or localStorage)');
         setSaveSuccess(true);
         // Clear success message after 5 seconds
         setTimeout(() => setSaveSuccess(null), 5000);
       } else {
-        console.error('Failed to save recording - API returned false');
+        console.error('Failed to save recording - could not save to either Supabase or localStorage');
         setSaveSuccess(false);
         // Clear error message after 5 seconds
         setTimeout(() => setSaveSuccess(null), 5000);
@@ -773,7 +785,7 @@ function App() {
                 </Box>
                 <Box>
                   <EmotionDisplay
-                    emotionResult={isSpeaking ? calibratedEmotionResult : null}
+                    emotionResult={isCapturing && isSpeaking ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
                 </Box>
@@ -787,13 +799,13 @@ function App() {
               }}>
                 <Box>
                   <SpeechTempoDisplay
-                    speechRate={isSpeaking ? emotionResult?.speech_rate : undefined}
+                    speechRate={isCapturing && isSpeaking ? emotionResult?.speech_rate : undefined}
                     isCapturing={isCapturing}
                   />
                 </Box>
                 <Box>
                   <EmotionCalibration
-                    emotionResult={isSpeaking ? emotionResult : null}
+                    emotionResult={isCapturing && isSpeaking ? emotionResult : null}
                     isCapturing={isCapturing}
                     onCalibrationUpdate={handleCalibrationUpdate}
                   />
@@ -807,7 +819,7 @@ function App() {
                 mb: 4
               }}>
                 <Box>
-                  {emotionResult?.speech_characteristics && (
+                  {emotionResult?.speech_characteristics && isCapturing && (
                     <SpeechCharacteristics
                       characteristics={formatSpeechCharacteristics(emotionResult.speech_characteristics)}
                       isCapturing={isCapturing}
@@ -816,7 +828,7 @@ function App() {
                 </Box>
                 <Box>
                   <Feedback
-                    emotionResult={isSpeaking ? calibratedEmotionResult : null}
+                    emotionResult={isCapturing && isSpeaking ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
                 </Box>

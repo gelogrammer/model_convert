@@ -303,6 +303,11 @@ export const cleanupAudio = () => {
  * Process audio data and send to server
  */
 const processAudioData = (audioData: Float32Array) => {
+  // Only process and send data if we're actively recording
+  if (!isRecording) {
+    return;
+  }
+  
   // Apply more sophisticated speech detection
   const speechAnalysis = analyzeAudioData(audioData);
   

@@ -6,6 +6,9 @@ let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let connectionRetryCount = 0;
 const MAX_RETRIES = 5;
 
+// Control flag for audio processing
+let processAudioEnabled = false;
+
 // WebSocket event handlers
 interface WebSocketHandlers {
   onConnect?: () => void;
@@ -197,13 +200,32 @@ export const closeWebSocket = () => {
 };
 
 /**
+ * Enable or disable audio processing
+ */
+export const setAudioProcessingEnabled = (enabled: boolean) => {
+  processAudioEnabled = enabled;
+  
+  // Inform the server about the change
+  if (socket && socket.connected) {
+    socket.emit('set_processing', { enabled });
+    console.log(`Audio processing ${enabled ? 'enabled' : 'disabled'}`);
+    return true;
+  }
+  
+  return false;
+};
+
+/**
  * Send audio data to server
  */
 export const sendAudioData = (audioData: string, metadata?: any) => {
   if (socket && socket.connected) {
     socket.emit('audio_stream', {
       audio: audioData,
-      metadata: metadata || {}
+      metadata: {
+        ...metadata || {},
+        processAudio: processAudioEnabled
+      }
     });
     return true;
   }
