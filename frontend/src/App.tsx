@@ -651,7 +651,7 @@ function App() {
                   mr: { xs: 1, md: 2 }
                 }}
               >
-                <Typography variant="h6" sx={{ color: 'white', fontSize: { xs: '0.8rem', md: '1rem' }, m: 0, p: 0 }}>RT</Typography>
+                <Typography variant="h6" sx={{ color: 'white', fontSize: { xs: '0.8rem', md: '1rem' }, m: 0, p: 0 }}>TW</Typography>
               </Box>
               <Typography 
                 variant="h5" 
@@ -666,7 +666,7 @@ function App() {
                   display: { xs: 'none', sm: 'block' }
                 }}
               >
-                SpeechSense AI
+                Talk.twahnalyzer
               </Typography>
             </Box>
             
