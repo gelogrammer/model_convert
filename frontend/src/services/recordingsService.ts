@@ -54,37 +54,119 @@ interface LocalRecording {
 export const ensureCompatibleAudioFormat = async (blob: Blob): Promise<Blob> => {
   console.log('Checking audio format compatibility for blob type:', blob.type);
   
-  // Most widely supported audio format across browsers
-  const targetFormat = 'audio/webm';
+  // Check blob validity
+  if (!blob || blob.size === 0) {
+    console.error('Invalid blob: empty or null');
+    return new Blob([], { type: 'audio/mpeg' }); // Return empty blob with MP3 type
+  }
   
-  // If the blob is already a webm file, we're good to go
-  if (blob.type === targetFormat || blob.type === 'audio/webm;codecs=opus') {
-    console.log('Audio is already in webm format, keeping as-is');
+  // Helper to check browser support for audio formats
+  const checkFormatSupport = (): { 
+    mp3Support: boolean;
+    wavSupport: boolean;
+    webmSupport: boolean;
+    oggSupport: boolean;
+    aacSupport: boolean;
+    bestFormat: string;
+  } => {
+    const audio = new Audio();
+    
+    // Check support for various formats
+    const mp3Support = audio.canPlayType('audio/mpeg') !== '';
+    const wavSupport = audio.canPlayType('audio/wav') !== '';
+    const webmSupport = audio.canPlayType('audio/webm') !== '';
+    const oggSupport = audio.canPlayType('audio/ogg') !== '';
+    const aacSupport = audio.canPlayType('audio/aac') !== '';
+    
+    console.log('Browser format support:', {
+      mp3: mp3Support ? 'Yes' : 'No',
+      wav: wavSupport ? 'Yes' : 'No',
+      webm: webmSupport ? 'Yes' : 'No',
+      ogg: oggSupport ? 'Yes' : 'No',
+      aac: aacSupport ? 'Yes' : 'No'
+    });
+    
+    // Determine best format based on browser support
+    // Prefer MP3 for widest compatibility, followed by AAC, WebM, WAV and OGG
+    let bestFormat = 'audio/mpeg'; // Default to MP3
+    
+    if (mp3Support) {
+      bestFormat = 'audio/mpeg';
+    } else if (aacSupport) {
+      bestFormat = 'audio/aac';
+    } else if (webmSupport) {
+      bestFormat = 'audio/webm';
+    } else if (wavSupport) {
+      bestFormat = 'audio/wav';
+    } else if (oggSupport) {
+      bestFormat = 'audio/ogg';
+    }
+    
+    return {
+      mp3Support,
+      wavSupport,
+      webmSupport,
+      oggSupport,
+      aacSupport,
+      bestFormat
+    };
+  };
+  
+  // Get format support information
+  const formatSupport = checkFormatSupport();
+  
+  // Determine current format and whether conversion is needed
+  const currentType = blob.type.toLowerCase();
+  let targetType = formatSupport.bestFormat;
+  
+  // Normalize current format for comparison
+  let normalizedCurrentType = currentType;
+  if (currentType.includes('mpeg') || currentType.includes('mp3')) {
+    normalizedCurrentType = 'audio/mpeg';
+  } else if (currentType.includes('wav')) {
+    normalizedCurrentType = 'audio/wav';
+  } else if (currentType.includes('webm')) {
+    normalizedCurrentType = 'audio/webm';
+  } else if (currentType.includes('ogg')) {
+    normalizedCurrentType = 'audio/ogg';
+  } else if (currentType.includes('aac') || currentType.includes('mp4')) {
+    normalizedCurrentType = 'audio/aac';
+  } else if (currentType === '' || currentType === 'application/octet-stream') {
+    // For unknown types, assume we need to convert
+    normalizedCurrentType = '';
+  }
+  
+  // Check if current format is already supported and no conversion needed
+  if (normalizedCurrentType === targetType) {
+    console.log('Audio is already in optimal format, keeping as-is');
+    return blob;
+  }
+  
+  // Current format is also well-supported, can keep as-is
+  if ((normalizedCurrentType === 'audio/mpeg' && formatSupport.mp3Support) ||
+      (normalizedCurrentType === 'audio/webm' && formatSupport.webmSupport) ||
+      (normalizedCurrentType === 'audio/wav' && formatSupport.wavSupport) ||
+      (normalizedCurrentType === 'audio/ogg' && formatSupport.oggSupport) ||
+      (normalizedCurrentType === 'audio/aac' && formatSupport.aacSupport)) {
+    console.log('Current format is well-supported, keeping as-is');
     return blob;
   }
   
   try {
-    // Create an audio element to test playability
-    const audio = new Audio();
-    const canPlayWebm = audio.canPlayType('audio/webm');
+    console.log(`Converting audio from ${normalizedCurrentType || 'unknown'} to ${targetType}`);
     
-    // Empty string means "no" in the canPlayType API
-    if (canPlayWebm === '') {
-      console.log('This browser cannot play webm format, trying with original format:', blob.type);
-      // If browser can't play webm, keep the original format
-      return blob;
-    }
+    // Create a new blob with the target type
+    // Note: This is only changing the MIME type, not transcoding the audio
+    // For actual transcoding, a Web Audio API solution would be needed
+    const newBlob = new Blob([await blob.arrayBuffer()], { type: targetType });
     
-    // Check blob validity
-    if (blob.size === 0) {
-      console.error('Received empty blob for format conversion');
-      return blob; // Return original even if empty
-    }
+    console.log('Format conversion complete:', {
+      originalSize: blob.size,
+      newSize: newBlob.size,
+      newType: targetType
+    });
     
-    // For all formats, just change the MIME type to webm
-    // This is simpler than trying to convert and won't lose data
-    console.log('Setting consistent audio/webm MIME type for better compatibility');
-    return new Blob([await blob.arrayBuffer()], { type: targetFormat });
+    return newBlob;
   } catch (err) {
     console.error('Audio format conversion failed:', err);
     // Return original blob on error
@@ -95,26 +177,84 @@ export const ensureCompatibleAudioFormat = async (blob: Blob): Promise<Blob> => 
 // Calculate duration (if you have this information)
 const calculateActualDuration = async (blob: Blob): Promise<number> => {
   return new Promise((resolve) => {
+    if (!blob || blob.size === 0) {
+      console.error('Cannot calculate duration of empty blob');
+      resolve(0);
+      return;
+    }
+    
     // Create a temporary audio element to get accurate duration
     const audio = new Audio();
     const objectUrl = URL.createObjectURL(blob);
     
+    // Set a timeout to prevent hanging if metadata never loads
+    const timeoutId = setTimeout(() => {
+      console.warn('Audio metadata load timed out, using fallback duration calculation');
+      URL.revokeObjectURL(objectUrl);
+      
+      // Fallback: estimate based on file size (very rough)
+      // Assuming standard 128kbps audio, which is about 16KB per second
+      const bytesPerSecond = 16 * 1024; 
+      const estimatedDuration = Math.max(1000, Math.round((blob.size / bytesPerSecond) * 1000));
+      resolve(estimatedDuration);
+    }, 3000); // 3 second timeout
+    
+    // Listener for successful metadata load
     audio.addEventListener('loadedmetadata', () => {
+      clearTimeout(timeoutId);
+      
+      // Check if duration is valid
+      if (isNaN(audio.duration) || audio.duration === Infinity || audio.duration <= 0) {
+        console.warn('Invalid duration value:', audio.duration);
+        URL.revokeObjectURL(objectUrl);
+        
+        // Fallback: estimate based on file size
+        const bytesPerSecond = 16 * 1024;
+        const estimatedDuration = Math.max(1000, Math.round((blob.size / bytesPerSecond) * 1000));
+        resolve(estimatedDuration);
+        return;
+      }
+      
       // Convert to milliseconds for consistency with the rest of the app
       const durationMs = Math.round(audio.duration * 1000);
       URL.revokeObjectURL(objectUrl);
+      console.log('Audio duration from metadata:', durationMs, 'ms');
       resolve(durationMs);
     });
     
     // Handle errors and provide fallback duration estimate
-    audio.addEventListener('error', () => {
+    audio.addEventListener('error', (e) => {
+      clearTimeout(timeoutId);
+      console.error('Error loading audio metadata:', e);
       URL.revokeObjectURL(objectUrl);
+      
       // Fallback: estimate based on file size (very rough)
-      const estimatedDuration = blob.size > 0 ? Math.floor(blob.size / 16000) : 0;
+      // For different formats, estimation varies:
+      // - MP3: ~16KB per second at 128kbps
+      // - WAV: ~172KB per second for 44.1kHz 16-bit stereo
+      let bytesPerSecond = 16 * 1024; // Default to MP3 estimate
+      
+      // Adjust estimate based on format if known
+      if (blob.type.includes('wav')) {
+        bytesPerSecond = 172 * 1024; // WAV estimate
+      } else if (blob.type.includes('webm')) {
+        bytesPerSecond = 20 * 1024; // WebM Opus estimate
+      }
+      
+      const estimatedDuration = Math.max(1000, Math.round((blob.size / bytesPerSecond) * 1000));
+      console.log('Estimated audio duration from file size:', estimatedDuration, 'ms');
       resolve(estimatedDuration);
     });
     
+    // Set the source to trigger metadata loading
     audio.src = objectUrl;
+    
+    // Explicitly try to load metadata (helps in some browsers)
+    try {
+      audio.load();
+    } catch (e) {
+      console.warn('Error calling load() on audio element', e);
+    }
   });
 };
 
@@ -142,42 +282,39 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
     
     // Log the blob details
     const uuid = Date.now().toString();
-    console.log(`[${uuid}] Starting processing of audio blob:`, {
+    console.log(`[${uuid}] Processing audio blob:`, {
       size: recordedBlob.size,
       type: recordedBlob.type,
       timestamp: new Date().toISOString()
     });
     
-    // Ensure audio format is compatible with browsers
-    let finalBlob;
-    try {
-      finalBlob = await ensureCompatibleAudioFormat(recordedBlob);
-      console.log(`[${uuid}] Processed audio blob for compatibility:`, {
-        originalType: recordedBlob.type,
-        newType: finalBlob.type,
-        originalSize: recordedBlob.size,
-        newSize: finalBlob.size
-      });
-    } catch (formatError) {
-      console.error(`[${uuid}] Format conversion error:`, formatError);
-      finalBlob = recordedBlob; // Use original on error
+    // CRITICAL FIX: No conversions or manipulations whatsoever
+    // Use exactly what we got from MediaRecorder
+    const finalBlob = recordedBlob;
+    
+    // Determine file extension from MIME type
+    let fileExtension = 'wav';
+    const mimeType = finalBlob.type.toLowerCase();
+    
+    if (mimeType.includes('webm')) {
+      fileExtension = 'webm';
+    } else if (mimeType.includes('mp3') || mimeType.includes('mpeg')) {
+      fileExtension = 'mp3';
+    } else if (mimeType.includes('ogg')) {
+      fileExtension = 'ogg';
     }
     
-    // Create filename with correct extension based on actual type
-    let fileExtension = 'wav'; // Default to most compatible format
-    if (finalBlob.type.includes('mp3') || finalBlob.type.includes('mpeg')) {
-      fileExtension = 'mp3';
-    } else if (finalBlob.type.includes('webm')) {
-      // Convert webm to wav for better compatibility
-      finalBlob = new Blob([await finalBlob.arrayBuffer()], { type: 'audio/wav' });
-      fileExtension = 'wav';
-    }
     const fileName = `recording_${Date.now()}.${fileExtension}`;
     console.log('Generated filename:', fileName, 'with MIME type:', finalBlob.type);
     
     // Get accurate duration using an audio element
     const duration = await calculateActualDuration(finalBlob);
     console.log('Actual audio duration:', duration, 'ms');
+    
+    // Verify the duration is accurate
+    if (duration < 500) {
+      console.warn('VERY SHORT DURATION DETECTED - potential audio capture issue');
+    }
     
     // Get audio analysis results
     const analysisResult = getAudioAnalysisResult();
@@ -611,46 +748,230 @@ export const convertAudioForBrowserPlayback = async (audioUrl: string): Promise<
     
     console.log('Converting audio for browser playback:', audioUrl);
     
-    // Fetch the audio file
-    const response = await fetch(audioUrl, {
-      headers: {
-        'Range': 'bytes=0-', // This can help with some CORS issues
-        'Cache-Control': 'no-cache', // Avoid caching issues
+    // Add cache-busting parameter to avoid caching issues with Supabase URLs
+    const urlWithNoCacheParam = audioUrl.includes('?') 
+      ? `${audioUrl}&_nocache=${Date.now()}` 
+      : `${audioUrl}?_nocache=${Date.now()}`;
+    
+    // Fetch the audio file with appropriate headers for CORS
+    try {
+      const response = await fetch(urlWithNoCacheParam, {
+        method: 'GET',
+        headers: {
+          'Range': 'bytes=0-', // Request range to help with partial content responses
+          'Cache-Control': 'no-cache', // Avoid caching issues
+          'Pragma': 'no-cache',
+        },
+        mode: 'cors', // Use CORS mode to handle cross-origin requests
+        credentials: 'omit', // Don't send cookies to reduce CORS issues
+      });
+      
+      if (!response.ok) {
+        console.error(`Failed to fetch audio: ${response.status} ${response.statusText}`);
+        
+        // Try alternative fetch approach without Range header, which can cause issues
+        console.log('Trying alternative fetch approach without Range header');
+        const altResponse = await fetch(urlWithNoCacheParam, {
+          method: 'GET',
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+          mode: 'cors',
+          credentials: 'omit',
+        });
+        
+        if (!altResponse.ok) {
+          console.error(`Alternative fetch also failed: ${altResponse.status} ${altResponse.statusText}`);
+          throw new Error(`Failed to fetch audio: ${altResponse.status}`);
+        }
+        
+        const audioBlob = await altResponse.blob();
+        console.log('Fetched audio blob with alternative method:', audioBlob.type, audioBlob.size);
+        return handleAudioBlob(audioBlob);
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch audio: ${response.status}`);
+      
+      // Get the audio file as blob
+      const audioBlob = await response.blob();
+      console.log('Fetched audio blob:', audioBlob.type, audioBlob.size);
+      
+      return handleAudioBlob(audioBlob);
+    } catch (fetchError) {
+      console.error('Error fetching audio:', fetchError);
+      
+      // If all attempts fail, return a data URI for the "audio not available" message
+      console.log('Creating fallback "audio not available" message');
+      return createAudioNotAvailableMessage();
     }
-    
-    // Get the audio file as blob
-    const audioBlob = await response.blob();
-    console.log('Fetched audio blob:', audioBlob.type, audioBlob.size);
-    
-    // Small function to test if audio can be played
-    const canBrowserPlayType = (mimeType: string): boolean => {
-      const audio = document.createElement('audio');
-      const canPlay = audio.canPlayType(mimeType);
-      // Empty string means "no", any other value means some level of support
-      return canPlay !== '';
-    };
-    
-    // Check if the original format is supported by the browser
-    if (canBrowserPlayType(audioBlob.type)) {
-      // Original format is playable, just create a blob URL
-      console.log('Browser can play original format, creating blob URL');
-      return URL.createObjectURL(audioBlob);
-    }
-    
-    // Original format not supported, try conversion
-    console.log('Browser cannot play original format, attempting conversion');
-    const compatibleBlob = await ensureCompatibleAudioFormat(audioBlob);
-    
-    // Create a new blob URL with the compatible format
-    return URL.createObjectURL(compatibleBlob);
   } catch (error) {
     console.error('Error converting audio for browser playback:', error);
     return audioUrl; // Return original URL on failure
+  }
+};
+
+// Helper function to process audio blob and prepare for playback
+const handleAudioBlob = (audioBlob: Blob): string => {
+  // Check if blob is valid
+  if (!audioBlob || audioBlob.size === 0) {
+    console.error('Received empty audio blob');
+    return createAudioNotAvailableMessage();
+  }
+  
+  // Small function to test if audio can be played
+  const canBrowserPlayType = (mimeType: string): boolean => {
+    const audio = document.createElement('audio');
+    return audio.canPlayType(mimeType) !== '';
+  };
+  
+  // Detect the format from blob type
+  let detectedFormat = audioBlob.type.toLowerCase();
+  console.log('Detected audio format:', detectedFormat);
+  
+  // Normalize common audio types for better detection
+  if (detectedFormat.includes('mpeg') || detectedFormat.includes('mp3')) {
+    detectedFormat = 'audio/mpeg';
+  } else if (detectedFormat.includes('wav')) {
+    detectedFormat = 'audio/wav';
+  } else if (detectedFormat.includes('webm')) {
+    detectedFormat = 'audio/webm';
+  } else if (detectedFormat.includes('ogg')) {
+    detectedFormat = 'audio/ogg';
+  } else if (detectedFormat.includes('aac') || detectedFormat.includes('mp4')) {
+    detectedFormat = 'audio/aac';
+  } else if (detectedFormat === '' || detectedFormat === 'application/octet-stream') {
+    // Try to auto-detect based on common browser support
+    detectedFormat = 'audio/mpeg'; // Default to MP3 as most widely supported
+  }
+  
+  // Check if the browser can play this format
+  if (canBrowserPlayType(detectedFormat)) {
+    console.log(`Browser can play ${detectedFormat}, creating blob URL`);
+    // Create a blob with the correct MIME type
+    const playableBlob = new Blob([audioBlob], { type: detectedFormat });
+    return URL.createObjectURL(playableBlob);
+  }
+  
+  // Find a format the browser supports
+  console.log('Finding a compatible audio format for this browser');
+  let compatibleFormat = '';
+  
+  if (canBrowserPlayType('audio/mpeg')) {
+    compatibleFormat = 'audio/mpeg';
+  } else if (canBrowserPlayType('audio/webm')) {
+    compatibleFormat = 'audio/webm';
+  } else if (canBrowserPlayType('audio/wav')) {
+    compatibleFormat = 'audio/wav';
+  } else if (canBrowserPlayType('audio/ogg')) {
+    compatibleFormat = 'audio/ogg';
+  } else if (canBrowserPlayType('audio/aac')) {
+    compatibleFormat = 'audio/aac';
+  }
+  
+  if (compatibleFormat) {
+    console.log(`Converting to ${compatibleFormat} for browser compatibility`);
+    // Create a new blob with the compatible format
+    const compatibleBlob = new Blob([audioBlob], { type: compatibleFormat });
+    return URL.createObjectURL(compatibleBlob);
+  }
+  
+  // If no compatible format found, try with the original blob anyway
+  console.warn('No compatible audio format found, trying with original format');
+  return URL.createObjectURL(audioBlob);
+};
+
+// Create a "audio not available" message using a data URI
+const createAudioNotAvailableMessage = (): string => {
+  // Try to create a simple beep sound as fallback
+  try {
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 440; // A4 note
+    gainNode.gain.value = 0.5;
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    
+    // Record the beep
+    const duration = 0.5; // seconds
+    const sampleRate = audioCtx.sampleRate;
+    const frameCount = sampleRate * duration;
+    const audioBuffer = audioCtx.createBuffer(1, frameCount, sampleRate);
+    const channelData = audioBuffer.getChannelData(0);
+    
+    // Fill with a simple sine wave
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = Math.sin(440 * 2 * Math.PI * i / sampleRate) * 0.5;
+    }
+    
+    // Convert buffer to WAV
+    const wavBuffer = audioBufferToWav(audioBuffer);
+    const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+    
+    return URL.createObjectURL(blob);
+  } catch (e) {
+    console.error('Failed to create audio not available message:', e);
+    // Return an empty audio blob as last resort
+    const emptyBlob = new Blob([], { type: 'audio/wav' });
+    return URL.createObjectURL(emptyBlob);
+  }
+};
+
+// Convert AudioBuffer to WAV format
+const audioBufferToWav = (buffer: AudioBuffer): ArrayBuffer => {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM format
+  const bitDepth = 16;
+  
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  
+  // Create the WAV file buffer
+  const dataLength = buffer.length * numChannels * bytesPerSample;
+  const arrayBuffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(arrayBuffer);
+  
+  // RIFF identifier
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataLength, true);
+  writeString(view, 8, 'WAVE');
+  
+  // Format chunk
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, format, true); // format (PCM)
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true); // byte rate
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  
+  // Data chunk
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataLength, true);
+  
+  // Write the audio data
+  let offset = 44;
+  for (let i = 0; i < buffer.length; i++) {
+    for (let channel = 0; channel < numChannels; channel++) {
+      const sample = buffer.getChannelData(channel)[i];
+      // Convert float to int16
+      const int16 = Math.max(-1, Math.min(1, sample)) * 0x7FFF;
+      view.setInt16(offset, int16, true);
+      offset += bytesPerSample;
+    }
+  }
+  
+  return arrayBuffer;
+};
+
+// Helper to write string to DataView
+const writeString = (view: DataView, offset: number, string: string): void => {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
   }
 };
 

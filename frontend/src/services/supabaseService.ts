@@ -280,90 +280,31 @@ export const uploadRecording = async (
     console.log('File MIME type:', file.type);
     console.log('Recording duration:', metadata.duration);
     
-    // Check if Supabase client is initialized
-    if (!supabaseUrl || !supabaseKey) {
-      troubleshootLog('Supabase connection not initialized');
-      console.error('Supabase connection not properly initialized. Check environment variables.');
-      return { data: null, error: new Error('Supabase connection not properly initialized') };
+    // CRITICAL: Never convert WAV files as this might be causing truncation
+    // Just upload the original blob exactly as received from the recorder
+    const uploadBlob = file;
+    const contentType = file.type || metadata.mimeType || 'audio/wav';
+    
+    // Ensure the file extension matches the content type
+    let fileExtension = 'wav';
+    if (contentType.includes('mp3') || contentType.includes('mpeg')) {
+      fileExtension = 'mp3';
+    } else if (contentType.includes('webm')) {
+      fileExtension = 'webm';
+    } else if (contentType.includes('ogg')) {
+      fileExtension = 'ogg';
     }
     
-    // Always try to fix database policies first before attempting upload
-    try {
-      console.log('Ensuring database policies before upload...');
-      await ensureDatabaseSetup();
-    } catch (policiesError) {
-      console.warn('Error ensuring policies but continuing with upload:', policiesError);
+    // Ensure filename has correct extension
+    if (!fileName.toLowerCase().endsWith(`.${fileExtension}`)) {
+      fileName = fileName.split('.')[0] + `.${fileExtension}`;
     }
     
-    // Ensure the bucket exists with correct permissions before upload 
-    try {
-      console.log('Checking recordings bucket...');
-      
-      // First check if the bucket exists
-      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
-      
-      let bucketExists = false;
-      if (!listError && buckets) {
-        bucketExists = buckets.some(bucket => bucket.name === 'recordings');
-      }
-      
-      if (!bucketExists) {
-        console.log('Recordings bucket does not exist, creating it...');
-        const { error: createError } = await supabase.storage.createBucket('recordings', {
-          public: true,
-          allowedMimeTypes: ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm'],
-          fileSizeLimit: 52428800 // 50MB
-        });
-        
-        if (createError) {
-          console.error('Error creating bucket:', createError);
-          if (createError.message.includes('duplicate') || createError.message.includes('already exists')) {
-            console.log('Bucket already exists, continuing...');
-          } else if (createError.message.includes('permission') || createError.message.includes('policy')) {
-            console.warn('Permission issue with bucket creation, will try direct upload anyway');
-          }
-        } else {
-          console.log('Successfully created recordings bucket');
-        }
-      } else {
-        console.log('Recordings bucket exists');
-        
-        // Update bucket settings to ensure it's public
-        try {
-          await supabase.rpc('ensure_recordings_bucket_settings', {
-            is_public: true,
-            size_limit: 52428800,
-            mime_types: ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm']
-          });
-        } catch (updateError) {
-          console.warn('Could not update bucket settings, continuing anyway:', updateError);
-        }
-      }
-    } catch (bucketError) {
-      console.warn('Error during bucket verification, continuing anyway:', bucketError);
-    }
-    
-    // Ensure the file has a proper content type, preferring WAV format
-    let contentType = file.type || metadata.mimeType || 'audio/wav';
-    
-    // If not WAV already, set to WAV
-    if (!contentType.includes('wav')) {
-      contentType = 'audio/wav';
-      
-      // Change the file extension to .wav if needed
-      if (!fileName.toLowerCase().endsWith('.wav')) {
-        fileName = fileName.substring(0, fileName.lastIndexOf('.')) + '.wav';
-      }
-    }
-    
-    // Create a new blob with the WAV content type
-    const uploadBlob = new Blob([await file.arrayBuffer()], { type: contentType });
-    
-    console.log('Uploading file with content type:', contentType);
+    console.log(`Uploading original file with content type: ${contentType}, filename: ${fileName}`);
     
     // Try the upload with multiple fallbacks
     try {
-      console.log('Attempting primary upload method...');
+      console.log('Attempting primary upload method with original blob...');
       
       // Try with standard upload first
       let uploadData;
@@ -375,6 +316,7 @@ export const uploadRecording = async (
           .upload(fileName, uploadBlob, {
             contentType,
             upsert: true,
+            cacheControl: 'no-cache' // Prevent caching issues during playback
           });
           
         uploadData = uploadResult.data;
@@ -391,12 +333,15 @@ export const uploadRecording = async (
         // Try simpler upload with fewer options
         try {
           console.log('Attempting simplified upload...');
-          // Generate a simpler filename with .wav extension
-          const simpleFileName = `audio_${Date.now()}.wav`;
+          // Generate a simpler filename with correct extension
+          const simpleFileName = `audio_${Date.now()}.${fileExtension}`;
           
           const { data: altData, error: altError } = await supabase.storage
             .from('recordings')
-            .upload(simpleFileName, uploadBlob);
+            .upload(simpleFileName, uploadBlob, {
+              contentType,
+              cacheControl: 'no-cache'
+            });
           
           if (altError) {
             console.error('Alternative upload also failed:', altError);
@@ -439,7 +384,8 @@ export const uploadRecording = async (
             public_url: publicUrl,
             duration: metadata.duration || 0,
             emotion_data: metadata.emotionData || {},
-            recorded_at: new Date().toISOString()
+            recorded_at: new Date().toISOString(),
+            mime_type: contentType // Store the MIME type for better playback
           })
           .select()
           .single();
@@ -461,7 +407,8 @@ export const uploadRecording = async (
                 file_path: fileName,
                 public_url: publicUrl,
                 duration: metadata.duration || 0,
-                recorded_at: new Date().toISOString()
+                recorded_at: new Date().toISOString(),
+                mime_type: contentType // Store the MIME type for better playback
               })
               .select()
               .single();
@@ -473,7 +420,8 @@ export const uploadRecording = async (
                   fileUploaded: true, 
                   metadataSaved: false,
                   publicUrl,
-                  fileName 
+                  fileName,
+                  mimeType: contentType
                 }, 
                 error: minimalError 
               };
@@ -489,7 +437,8 @@ export const uploadRecording = async (
               fileUploaded: true, 
               metadataSaved: false,
               publicUrl,
-              fileName 
+              fileName,
+              mimeType: contentType
             }, 
             error: recordError 
           };
@@ -504,7 +453,8 @@ export const uploadRecording = async (
             fileUploaded: true, 
             metadataSaved: false,
             publicUrl,
-            fileName 
+            fileName,
+            mimeType: contentType
           }, 
           error: metadataError 
         };

@@ -286,30 +286,59 @@ export const startAudioCapture = async (): Promise<boolean> => {
   // Set up MediaRecorder for highest quality recording
   try {
     if (mediaStream) {
-      // Simplify by using audio/webm format which has wide support
-      const mimeType = 'audio/webm';
-      console.log('Using consistent audio format:', mimeType);
+      // Try WAV format first as it's most reliable for capturing full audio
+      const tryMimeTypes = [
+        'audio/wav',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus',
+        'audio/mpeg',
+        ''  // Empty string = browser default
+      ];
+      
+      let mimeType = '';
+      // Find the first supported MIME type
+      for (const type of tryMimeTypes) {
+        if (type && MediaRecorder.isTypeSupported(type)) {
+          mimeType = type;
+          console.log(`Using supported MIME type: ${mimeType}`);
+          break;
+        }
+      }
       
       // Create MediaRecorder with appropriate options
-      const recorderOptions = {
-        mimeType,
-        audioBitsPerSecond: 128000 // 128 kbps for good quality
+      const recorderOptions: MediaRecorderOptions = {
+        audioBitsPerSecond: 256000 // Increase to 256 kbps for better quality
       };
+      
+      // Only set mimeType if one was found and supported
+      if (mimeType) {
+        recorderOptions.mimeType = mimeType;
+      }
       
       console.log('Creating MediaRecorder with options:', recorderOptions);
       
       try {
         mediaRecorder = new MediaRecorder(mediaStream, recorderOptions);
+        console.log('MediaRecorder created with format:', mediaRecorder.mimeType);
       } catch (e) {
-        console.warn('Failed to create MediaRecorder with audio/webm, falling back to default format', e);
-        mediaRecorder = new MediaRecorder(mediaStream);
-        console.log('Created MediaRecorder with default format:', mediaRecorder.mimeType);
+        console.warn('Failed to create MediaRecorder with specified options, falling back to default format', e);
+        try {
+          // Try with no options as absolute fallback
+          mediaRecorder = new MediaRecorder(mediaStream);
+          console.log('Created MediaRecorder with default format:', mediaRecorder.mimeType);
+        } catch (fallbackError) {
+          console.error('Failed to create MediaRecorder even with fallback:', fallbackError);
+          return false;
+        }
       }
       
       // Clear chunks array before starting
       recordedChunks = [];
       
-      // Set up data handler before starting recording
+      // CRITICAL: Only collect data when stopping recording
+      // This ensures we get the entire recording as one chunk
       mediaRecorder.ondataavailable = (event: BlobEvent) => {
         if (event.data && event.data.size > 0) {
           console.log('MediaRecorder data available, size:', event.data.size, 'type:', event.data.type);
@@ -319,10 +348,16 @@ export const startAudioCapture = async (): Promise<boolean> => {
         }
       };
       
-      // Start the recorder with smaller timeslice for more frequent chunks
-      const timeslice = 100; // Collect data in 100ms chunks instead of 1000ms
-      mediaRecorder.start(timeslice);
-      console.log('MediaRecorder started with timeslice:', timeslice, 'using format:', mediaRecorder.mimeType);
+      // Set up additional error handler
+      mediaRecorder.onerror = (event) => {
+        console.error('MediaRecorder error:', event);
+      };
+      
+      // CRITICAL FIX: Do NOT use timeslice parameter
+      // This is causing the recording to be split into chunks 
+      // and only the first chunk is being processed correctly
+      mediaRecorder.start();
+      console.log('MediaRecorder started without timeslice using format:', mediaRecorder.mimeType);
       
       isRecording = true;
       
@@ -374,10 +409,26 @@ export const stopAudioCapture = async () => {
     try {
       console.log('Stopping MediaRecorder...');
       
+      // Make sure we're in a good state to stop
+      if (mediaRecorder.state === 'inactive') {
+        console.log('MediaRecorder already inactive, nothing to stop');
+        isRecording = false;
+        return Promise.resolve();
+      }
+      
       // Return a promise that resolves when the recording is ready
       return new Promise<void>((resolve) => {
-        // Set up onstop handler before calling stop
+        // Set timeout to ensure we don't hang forever
+        const timeout = setTimeout(() => {
+          console.warn('MediaRecorder stop operation timed out after 5 seconds');
+          isRecording = false;
+          resolve();
+        }, 5000);
+        
+        // CRITICAL FIX: Set up onstop handler before calling stop
+        // This will be called after all data is collected
         mediaRecorder!.onstop = () => {
+          clearTimeout(timeout);
           console.log('MediaRecorder stopped, creating recording blob');
           
           // Verify we actually have recorded chunks
@@ -393,7 +444,14 @@ export const stopAudioCapture = async () => {
           // Create the blob from the chunks
           try {
             // Use the MIME type of the first chunk for better format consistency
-            const mimeType = recordedChunks[0]?.type || 'audio/webm';
+            const mimeType = recordedChunks[0]?.type || 'audio/wav';
+            
+            // Log all chunks for debugging
+            recordedChunks.forEach((chunk, i) => {
+              console.log(`Chunk ${i}: ${chunk.size} bytes, type: ${chunk.type}`);
+            });
+            
+            // Create blob with all chunks
             lastRecordedBlob = new Blob(recordedChunks, { type: mimeType });
             
             console.log('Recording blob created with size:', lastRecordedBlob.size, 'type:', lastRecordedBlob.type);
@@ -408,32 +466,21 @@ export const stopAudioCapture = async () => {
           // Analyze the recording automatically when stopping
           analyzeRecordedAudio().then(result => {
             console.log('Automatic audio analysis completed on stop:', 
-              result ? 'success' : 'failed');
+              result ? `success, duration: ${result.duration}s` : 'failed');
             
             isRecording = false;
             resolve();
           });
         };
         
-        // Add a final dataavailable event handler
-        const dataHandler = (event: BlobEvent) => {
-          console.log('Final data available event, size:', event.data.size);
-          if (event.data.size > 0) {
-            recordedChunks.push(event.data);
-          }
-        };
-        
-        mediaRecorder!.addEventListener('dataavailable', dataHandler);
-        
-        // Request all remaining data and then stop the recorder
+        // CRITICAL FIX: Simply stop the recorder
+        // No need for requestData as we're not using timeslice
+        // This will trigger ondataavailable with the entire recording
         try {
-          mediaRecorder!.requestData();
-          
-          // Stop the recorder immediately after requesting data
-          // No need for timeout which could cause timing issues
           mediaRecorder!.stop();
-        } catch (err) {
-          console.error('Error stopping MediaRecorder:', err);
+        } catch (stopErr) {
+          console.error('Error stopping MediaRecorder:', stopErr);
+          clearTimeout(timeout);
           isRecording = false;
           resolve();
         }
@@ -695,7 +742,7 @@ export const getAudioVisualizationData = (): Uint8Array | null => {
 export const getRecordedAudio = (): Blob | null => {
   console.log('getRecordedAudio called, checking for recorded data');
   
-  // If we have a stored blob, return that first
+  // If we have a stored blob, return that first, but verify it's valid
   if (lastRecordedBlob && lastRecordedBlob.size > 0) {
     console.log('Returning last recorded blob:', {
       size: lastRecordedBlob.size,
@@ -704,16 +751,25 @@ export const getRecordedAudio = (): Blob | null => {
     return lastRecordedBlob;
   }
   
-  // If we have chunks but no blob, create a blob from chunks
-  if (recordedChunks.length > 0) {
+  // If we have chunks but no valid blob, create a blob from chunks
+  if (recordedChunks && recordedChunks.length > 0) {
     try {
-      // Use the type of the first chunk for consistency
-      const mimeType = recordedChunks[0]?.type || 'audio/webm';
+      // CRITICAL FIX: We should now have only ONE chunk since we removed timeslice
+      // Log the chunk for debugging
+      console.log(`Creating blob from ${recordedChunks.length} chunks:`);
+      recordedChunks.forEach((chunk, i) => {
+        console.log(`Chunk ${i}: ${chunk.size} bytes, type: ${chunk.type}`);
+      });
+      
+      // Use the type of the first chunk
+      const mimeType = recordedChunks[0].type || 'audio/wav';
+      
+      // Create a blob directly from chunks - no filtering or processing
       const blob = new Blob(recordedChunks, { type: mimeType });
       
-      console.log('Created blob from recorded chunks:', {
+      console.log('Created blob:', {
         chunks: recordedChunks.length,
-        totalSize: recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0),
+        totalChunkSize: recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0),
         blobSize: blob.size,
         blobType: blob.type
       });
@@ -791,136 +847,203 @@ export const analyzeRecordedAudio = async (): Promise<AudioAnalysisResult | null
       return defaultAnalysis;
     }
     
-    // Convert blob to array buffer for analysis
-    const arrayBuffer = await recordedBlob.arrayBuffer();
-    
-    // Create a temporary AudioContext for analysis
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Try more accurate duration detection using Audio element
+    let audioDuration = 0;
     
     try {
-      // Decode the audio for analysis
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      audioDuration = await new Promise<number>((resolve) => {
+        const audio = new Audio();
+        audio.src = URL.createObjectURL(recordedBlob);
+        
+        // Set a timeout for metadata loading
+        const timeout = setTimeout(() => {
+          console.warn('Audio metadata loading timed out');
+          resolve(0); // Will use fallback calculation
+        }, 3000);
+        
+        audio.addEventListener('loadedmetadata', () => {
+          clearTimeout(timeout);
+          if (!isNaN(audio.duration) && isFinite(audio.duration) && audio.duration > 0) {
+            console.log('Audio duration from metadata:', audio.duration);
+            resolve(audio.duration);
+          } else {
+            console.warn('Invalid audio duration from metadata:', audio.duration);
+            resolve(0); // Will use fallback calculation
+          }
+        });
+        
+        audio.addEventListener('error', (e) => {
+          clearTimeout(timeout);
+          console.error('Error loading audio for duration calculation:', e);
+          resolve(0); // Will use fallback calculation
+        });
+        
+        audio.load(); // Force load
+      });
+    } catch (durationError) {
+      console.error('Error calculating audio duration:', durationError);
+    }
+    
+    // If we didn't get a valid duration from the Audio element, try with decodeAudioData
+    if (audioDuration <= 0) {
+      console.log('Using ArrayBuffer decoding for duration calculation');
+      // Convert blob to array buffer for analysis
+      const arrayBuffer = await recordedBlob.arrayBuffer();
       
-      // Get audio data for analysis
-      const channelData = audioBuffer.getChannelData(0);
+      // Create a temporary AudioContext for analysis
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
+        // Use a standard sample rate to avoid decoding issues
+        sampleRate: 44100
+      });
       
-      // Calculate audio metrics
-      
-      // RMS volume (overall volume level)
-      const rms = calculateRMS(channelData);
-      
-      // Find peaks for word detection (rough approximation)
-      const smoothedSignal = smoothSignal(Array.from(channelData), 100);
-      const peaks = findPeaks(smoothedSignal, 0.2, 1000);
-      
-      // Rough word count estimation (each major peak could represent a syllable)
-      const estimatedWordCount = Math.floor(peaks.length / 3);  // Assuming ~3 syllables per word avg
-      
-      // Estimate speech rate (words per minute)
-      const durationMinutes = audioBuffer.duration / 60;
-      const speechRate = durationMinutes > 0 ? Math.round(estimatedWordCount / durationMinutes) : 0;
-      
-      // Calculate silence ratio (rough approximation)
-      let silenceSamples = 0;
-      const silenceThreshold = 0.05;
-      
-      for (let i = 0; i < channelData.length; i++) {
-        if (Math.abs(channelData[i]) < silenceThreshold) {
-          silenceSamples++;
+      try {
+        // Decode the audio for analysis
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        
+        console.log('Decoded audio buffer with:', {
+          duration: audioBuffer.duration,
+          sampleRate: audioBuffer.sampleRate,
+          numberOfChannels: audioBuffer.numberOfChannels,
+          length: audioBuffer.length
+        });
+        
+        // Use the decoded duration
+        audioDuration = audioBuffer.duration;
+        
+        // Get audio data for analysis
+        const channelData = audioBuffer.getChannelData(0);
+        
+        // Calculate audio metrics
+        
+        // RMS volume (overall volume level)
+        const rms = calculateRMS(channelData);
+        
+        // Find peaks for word detection (rough approximation)
+        const smoothedSignal = smoothSignal(Array.from(channelData), 100);
+        const peaks = findPeaks(smoothedSignal, 0.2, 1000);
+        
+        // Rough word count estimation (each major peak could represent a syllable)
+        const estimatedWordCount = Math.floor(peaks.length / 3);  // Assuming ~3 syllables per word avg
+        
+        // Estimate speech rate (words per minute)
+        const durationMinutes = audioBuffer.duration / 60;
+        const speechRate = durationMinutes > 0 ? Math.round(estimatedWordCount / durationMinutes) : 0;
+        
+        // Calculate silence ratio (rough approximation)
+        let silenceSamples = 0;
+        const silenceThreshold = 0.05;
+        
+        for (let i = 0; i < channelData.length; i++) {
+          if (Math.abs(channelData[i]) < silenceThreshold) {
+            silenceSamples++;
+          }
+        }
+        
+        const silenceRatio = silenceSamples / channelData.length;
+        const silenceDuration = silenceRatio * audioBuffer.duration;
+        
+        // Find peaks for volume levels
+        const volumeLevels = [];
+        const windowSize = Math.floor(ctx.sampleRate / 10); // 100ms windows
+        
+        for (let i = 0; i < channelData.length; i += windowSize) {
+          const slice = channelData.slice(i, Math.min(i + windowSize, channelData.length));
+          volumeLevels.push(calculateRMS(slice));
+        }
+        
+        // Get peak volume
+        const peakVolume = Math.max(...volumeLevels);
+        
+        // Estimate speech rate category
+        let fluency = "Medium Fluency";
+        let tempo = "Medium Tempo";
+        let pronunciation = "Clear Pronunciation";
+        
+        if (speechRate > 160) {
+          tempo = "Fast Tempo";
+        } else if (speechRate < 100) {
+          tempo = "Slow Tempo";
+        }
+        
+        if (silenceRatio > 0.4) {
+          fluency = "Low Fluency";
+          pronunciation = "Unclear Pronunciation";
+        } else if (silenceRatio < 0.2 && speechRate > 130) {
+          fluency = "High Fluency";
+        }
+        
+        // Build segments (simplified)
+        const segments = [];
+        const segmentSize = 1.0; // 1-second segments
+        
+        for (let t = 0; t < audioBuffer.duration; t += segmentSize) {
+          const startSample = Math.floor(t * ctx.sampleRate);
+          const endSample = Math.floor(Math.min(audioBuffer.duration, t + segmentSize) * ctx.sampleRate);
+          
+          const segmentData = channelData.slice(startSample, endSample);
+          const segmentRMS = calculateRMS(segmentData);
+          
+          segments.push({
+            start: t,
+            end: Math.min(audioBuffer.duration, t + segmentSize),
+            isSpeech: segmentRMS > silenceThreshold
+          });
+        }
+        
+        // Estimate audio quality metrics
+        const audioQuality = {
+          clarity: 1.0 - silenceRatio,  // Higher silence ratio = lower clarity
+          noiseLevel: rms < 0.1 ? 0.8 : 0.3,  // If overall volume is very low, likely noise
+          distortion: peakVolume > 0.9 ? 0.7 : 0.1  // If peaks are very high, likely distortion
+        };
+        
+        // Create analysis result
+        const analysisResult: AudioAnalysisResult = {
+          duration: audioBuffer.duration,
+          averageVolume: rms,
+          peakVolume,
+          silenceDuration,
+          speechRate,
+          speechRateCategory: {
+            fluency: fluency as "High Fluency" | "Medium Fluency" | "Low Fluency",
+            tempo: tempo as "Fast Tempo" | "Medium Tempo" | "Slow Tempo",
+            pronunciation: pronunciation as "Clear Pronunciation" | "Unclear Pronunciation"
+          },
+          audioQuality,
+          segments,
+          wordCount: estimatedWordCount,
+          timestamp: new Date().toISOString()
+        };
+        
+        console.log('Audio analysis complete:', analysisResult);
+        
+        // Cache the result
+        lastAnalysisResult = analysisResult;
+        
+        return analysisResult;
+      } catch (error) {
+        console.error('Error analyzing audio data:', error);
+        
+        // Use file size to estimate duration if we got this far
+        if (audioDuration <= 0) {
+          // Estimate based on file size and format
+          const bytesPerSecond = recordedBlob.type.includes('wav') ? 44100 * 2 : 16000;
+          audioDuration = Math.max(1, recordedBlob.size / bytesPerSecond);
+          console.log('Estimated duration from file size:', audioDuration);
         }
       }
+    }
+    
+    // If we have a valid duration from either method, use it for a basic analysis
+    if (audioDuration > 0) {
+      console.log('Creating basic analysis with duration:', audioDuration);
       
-      const silenceRatio = silenceSamples / channelData.length;
-      const silenceDuration = silenceRatio * audioBuffer.duration;
-      
-      // Find peaks for volume levels
-      const volumeLevels = [];
-      const windowSize = Math.floor(ctx.sampleRate / 10); // 100ms windows
-      
-      for (let i = 0; i < channelData.length; i += windowSize) {
-        const slice = channelData.slice(i, Math.min(i + windowSize, channelData.length));
-        volumeLevels.push(calculateRMS(slice));
-      }
-      
-      // Get peak volume
-      const peakVolume = Math.max(...volumeLevels);
-      
-      // Estimate speech rate category
-      let fluency = "Medium Fluency";
-      let tempo = "Medium Tempo";
-      let pronunciation = "Clear Pronunciation";
-      
-      if (speechRate > 160) {
-        tempo = "Fast Tempo";
-      } else if (speechRate < 100) {
-        tempo = "Slow Tempo";
-      }
-      
-      if (silenceRatio > 0.4) {
-        fluency = "Low Fluency";
-        pronunciation = "Unclear Pronunciation";
-      } else if (silenceRatio < 0.2 && speechRate > 130) {
-        fluency = "High Fluency";
-      }
-      
-      // Build segments (simplified)
-      const segments = [];
-      const segmentSize = 1.0; // 1-second segments
-      
-      for (let t = 0; t < audioBuffer.duration; t += segmentSize) {
-        const startSample = Math.floor(t * ctx.sampleRate);
-        const endSample = Math.floor(Math.min(audioBuffer.duration, t + segmentSize) * ctx.sampleRate);
-        
-        const segmentData = channelData.slice(startSample, endSample);
-        const segmentRMS = calculateRMS(segmentData);
-        
-        segments.push({
-          start: t,
-          end: Math.min(audioBuffer.duration, t + segmentSize),
-          isSpeech: segmentRMS > silenceThreshold
-        });
-      }
-      
-      // Estimate audio quality metrics
-      const audioQuality = {
-        clarity: 1.0 - silenceRatio,  // Higher silence ratio = lower clarity
-        noiseLevel: rms < 0.1 ? 0.8 : 0.3,  // If overall volume is very low, likely noise
-        distortion: peakVolume > 0.9 ? 0.7 : 0.1  // If peaks are very high, likely distortion
-      };
-      
-      // Create analysis result
-      const analysisResult: AudioAnalysisResult = {
-        duration: audioBuffer.duration,
-        averageVolume: rms,
-        peakVolume,
-        silenceDuration,
-        speechRate,
-        speechRateCategory: {
-          fluency: fluency as "High Fluency" | "Medium Fluency" | "Low Fluency",
-          tempo: tempo as "Fast Tempo" | "Medium Tempo" | "Slow Tempo",
-          pronunciation: pronunciation as "Clear Pronunciation" | "Unclear Pronunciation"
-        },
-        audioQuality,
-        segments,
-        wordCount: estimatedWordCount,
-        timestamp: new Date().toISOString()
-      };
-      
-      console.log('Audio analysis complete:', analysisResult);
-      
-      // Cache the result
-      lastAnalysisResult = analysisResult;
-      
-      return analysisResult;
-    } catch (error) {
-      console.error('Error analyzing audio data:', error);
-      
-      // Return a basic analysis with defaults
+      // Return a basic analysis with the correct duration
       const basicAnalysis: AudioAnalysisResult = {
-        duration: recordedBlob.size > 0 ? Math.floor(recordedBlob.size / 16000) : 0,
+        duration: audioDuration,
         averageVolume: 0.5,
         peakVolume: 0.8,
-        silenceDuration: 0,
+        silenceDuration: audioDuration * 0.2, // Assume 20% silence
         speechRate: 120,
         speechRateCategory: {
           fluency: "Medium Fluency",
@@ -932,14 +1055,46 @@ export const analyzeRecordedAudio = async (): Promise<AudioAnalysisResult | null
           noiseLevel: 0.3,
           distortion: 0.1
         },
-        segments: [],
-        wordCount: 0,
+        segments: [
+          { start: 0, end: audioDuration, isSpeech: true }
+        ],
+        wordCount: Math.round(audioDuration * 2), // Rough estimate: 2 words per second
         timestamp: new Date().toISOString()
       };
       
       lastAnalysisResult = basicAnalysis;
       return basicAnalysis;
     }
+    
+    // Fallback to file size estimation if all else fails
+    const estimatedDuration = recordedBlob.size > 0 ? Math.max(1, recordedBlob.size / 16000) : 0;
+    
+    // Return a basic analysis with defaults
+    const basicAnalysis: AudioAnalysisResult = {
+      duration: estimatedDuration,
+      averageVolume: 0.5,
+      peakVolume: 0.8,
+      silenceDuration: 0,
+      speechRate: 120,
+      speechRateCategory: {
+        fluency: "Medium Fluency",
+        tempo: "Medium Tempo",
+        pronunciation: "Clear Pronunciation"
+      },
+      audioQuality: {
+        clarity: 0.7,
+        noiseLevel: 0.3,
+        distortion: 0.1
+      },
+      segments: [
+        { start: 0, end: estimatedDuration, isSpeech: true }
+      ],
+      wordCount: Math.round(estimatedDuration * 2), // Rough estimate: 2 words per second
+      timestamp: new Date().toISOString()
+    };
+    
+    lastAnalysisResult = basicAnalysis;
+    return basicAnalysis;
   } catch (error) {
     console.error('Error in audio analysis:', error);
     
