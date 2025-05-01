@@ -1,0 +1,9 @@
+1af3a50ad51718d2b0240a2c36db42b7b7a1b3c3 commit	refs/heads/2nd_version
+1af3a50ad51718d2b0240a2c36db42b7b7a1b3c3 commit	refs/heads/clean_history
+1a2110f1082a32cdb1e7c72aaf1fa0f15ac77208 commit	refs/heads/main
+1a2110f1082a32cdb1e7c72aaf1fa0f15ac77208 commit	refs/heads/mainmain
+74446f58e423fb35f43d8b39fe2215267e608877 commit	refs/heads/script_training
+74446f58e423fb35f43d8b39fe2215267e608877 commit	refs/remotes/origin/2nd_version
+260175cd8e3617bf15bf3cb89b9f3ddd7059e217 commit	refs/remotes/origin/main
+1a2110f1082a32cdb1e7c72aaf1fa0f15ac77208 commit	refs/remotes/origin/mainmain
+74446f58e423fb35f43d8b39fe2215267e608877 commit	refs/remotes/origin/script_training

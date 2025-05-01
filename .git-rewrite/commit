@@ -1,0 +1,6 @@
+tree e57243e0caeca427cd533050c369f5eeec5b3c90
+parent 5bad0d7fe1ac731e1b1d90805d23fb21c22c8d03
+author Angelo John S. Calleja <angelojohnse.calleja@bicol-u.edu.ph> 1745733101 +0800
+committer Angelo John S. Calleja <angelojohnse.calleja@bicol-u.edu.ph> 1745733101 +0800
+
+Fix CORS issues for Railway deployment
