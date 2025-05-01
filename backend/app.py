@@ -4,11 +4,21 @@ Flask application for Real-Time Speech Emotion Recognition API.
 
 import os
 import json
+import io
+import base64
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import eventlet
+import requests
+try:
+    import torch
+    from transformers import pipeline
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    print("Warning: transformers or torch not available. Using fallback approach for Hugging Face API.")
+    TRANSFORMERS_AVAILABLE = False
 
 # Import our model services
 from model_service import ModelService
@@ -172,6 +182,115 @@ def analyze_audio():
             
         return jsonify(response)
     except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/proxy/huggingface', methods=['POST'])
+def proxy_huggingface():
+    """Proxy requests to Hugging Face to avoid CORS issues"""
+    try:
+        data = request.json
+        print("Received proxy request data. Keys:", list(data.keys()))
+        
+        # Extract data from the request
+        model_id = data.get('model', 'firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3')
+        api_key = data.get('apiKey')
+        audio_base64 = data.get('audio')
+        
+        if not audio_base64:
+            error_msg = "Missing required audio data"
+            print(error_msg)
+            return jsonify({"status": "error", "message": error_msg}), 400
+        
+        print(f"Processing request for model: {model_id}")
+        print(f"Audio data length: {len(audio_base64)} characters")
+        
+        # Try using transformers pipeline if available
+        if TRANSFORMERS_AVAILABLE:
+            try:
+                # Convert base64 to bytes and save as temp file
+                audio_bytes = base64.b64decode(audio_base64)
+                
+                # Create temp file to process with pipeline
+                temp_file_path = 'temp_audio.wav'
+                with open(temp_file_path, 'wb') as f:
+                    f.write(audio_bytes)
+                
+                print("Using transformers pipeline for emotion classification")
+                # Use the specific model requested by the user
+                classifier = pipeline(
+                    "audio-classification", 
+                    model="firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3"
+                )
+                
+                result = classifier(temp_file_path)
+                print("Pipeline classification result:", result)
+                
+                # Clean up temp file
+                try:
+                    os.remove(temp_file_path)
+                except:
+                    pass
+                
+                # Return formatted result to match expected format
+                return jsonify({
+                    "status": "success",
+                    "result": result
+                })
+                
+            except Exception as pipeline_error:
+                import traceback
+                print(f"Pipeline error: {str(pipeline_error)}")
+                print(traceback.format_exc())
+                print("Falling back to REST API")
+        else:
+            print("Transformers not available, using REST API")
+        
+        # Standard REST API fallback approach
+        hf_url = f"https://api-inference.huggingface.co/models/{model_id}"
+        
+        # Standard REST API request
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        # For audio models, the API expects the base64 string directly
+        payload = {
+            'inputs': audio_base64
+        }
+        
+        # Make the request with a longer timeout
+        hf_response = requests.post(
+            hf_url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        print(f"REST API response status: {hf_response.status_code}")
+        
+        if not hf_response.ok:
+            error_text = hf_response.text
+            print(f"REST API error: {error_text}")
+            return jsonify({
+                "status": "error", 
+                "message": f"Hugging Face API error: {hf_response.status_code}", 
+                "error": error_text
+            }), hf_response.status_code
+        
+        # Process and return the response
+        result = hf_response.json()
+        print("REST API response:", result)
+        
+        return jsonify({
+            "status": "success",
+            "result": result
+        })
+        
+    except Exception as e:
+        import traceback
+        print(f"Exception in proxy_huggingface: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # Socket.IO event handlers

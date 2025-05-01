@@ -8,9 +8,11 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import SettingsIcon from '@mui/icons-material/Settings';
+import AnalyticsIcon from '@mui/icons-material/Analytics';
 import { fetchRecordings, deleteRecording as apiDeleteRecording, Recording as DBRecording, convertAudioForBrowserPlayback } from '../services/recordingsService';
 import { AudioAnalysisResult } from '../services/audioService';
 import { testSupabaseConnection } from '../services/supabaseService';
+import { createCompleteAnalysis } from '../services/analysisService';
 
 interface RecordingsProps {
   isCapturing: boolean;
@@ -32,6 +34,7 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
   const [hasBackendIssues, setHasBackendIssues] = useState(false);
   const [webAudioContext, setWebAudioContext] = useState<AudioContext | null>(null);
   const webAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const [analyzingRecordingId, setAnalyzingRecordingId] = useState<number | null>(null);
   
   // Add states for connection testing
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
@@ -801,6 +804,160 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
     return `${Math.round(value * 100)}%`;
   };
 
+  // Analyze recording manually with backend model
+  const analyzeRecording = async (recording: DBRecording) => {
+    try {
+      setAnalyzingRecordingId(recording.id);
+      console.log('Analyzing recording:', recording.id);
+      setError(null); // Clear any previous errors
+      
+      // Check if the recording has a valid URL
+      if (!recording.public_url) {
+        console.error('Recording has no URL');
+        setError('Recording has no valid URL to analyze');
+        setAnalyzingRecordingId(null);
+        return;
+      }
+      
+      // Fetch the audio file
+      const response = await fetch(recording.public_url);
+      if (!response.ok) {
+        console.error('Failed to fetch audio file:', response.status);
+        setError(`Failed to fetch audio file: ${response.status}`);
+        setAnalyzingRecordingId(null);
+        return;
+      }
+      
+      const audioBlob = await response.blob();
+      if (!audioBlob || audioBlob.size === 0) {
+        console.error('Empty audio blob');
+        setError('Failed to retrieve valid audio data');
+        setAnalyzingRecordingId(null);
+        return;
+      }
+      
+      try {
+        // Process with high-accuracy model
+        console.log('Processing audio with advanced model...');
+        
+        // First decode the audio to get its duration
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        
+        try {
+          // Decode the audio data
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          console.log('Successfully decoded audio:', {
+            duration: audioBuffer.duration,
+            sampleRate: audioBuffer.sampleRate,
+            numberOfChannels: audioBuffer.numberOfChannels
+          });
+          
+          // Convert to WAV for consistent processing
+          const wavBlob = await convertToWav(audioBuffer);
+          
+          // Use high-accuracy model analysis service
+          const analysisWithEmotion = await createCompleteAnalysis(wavBlob, audioBuffer.duration);
+          console.log('Advanced analysis complete:', analysisWithEmotion);
+          
+          // Update the recording in state with the new analysis
+          setRecordings(prevRecordings => 
+            prevRecordings.map(rec => 
+              rec.id === recording.id 
+                ? { 
+                    ...rec, 
+                    emotion_data: {
+                      ...rec.emotion_data,
+                      audioAnalysis: analysisWithEmotion,
+                      dominantEmotion: analysisWithEmotion.dominantEmotion,
+                      emotionAnalysis: analysisWithEmotion.emotionAnalysis
+                    } 
+                  } 
+                : rec
+            )
+          );
+          
+          // Display the analysis
+          setSelectedAnalysis(analysisWithEmotion);
+          setSelectedRecordingName(`${recording.file_name} - ${analysisWithEmotion.dominantEmotion}`);
+          setAnalysisDialogOpen(true);
+          
+        } catch (decodeErr) {
+          console.error('Failed to decode audio data:', decodeErr);
+          setError('Failed to process audio: The format may not be supported');
+        } finally {
+          audioContext.close();
+          setAnalyzingRecordingId(null);
+        }
+      } catch (err) {
+        console.error('Error analyzing recording:', err);
+        setError(`Error analyzing recording: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setAnalyzingRecordingId(null);
+      }
+    } catch (err) {
+      console.error('Error analyzing recording:', err);
+      setError(`Error analyzing recording: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setAnalyzingRecordingId(null);
+    }
+  };
+
+  // Helper function to convert AudioBuffer to WAV format Blob
+  const convertToWav = async (audioBuffer: AudioBuffer): Promise<Blob> => {
+    // Get channels data
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    
+    // Create the WAV file
+    const dataLength = length * numChannels * 2; // 16-bit audio (2 bytes per sample)
+    const buffer = new ArrayBuffer(44 + dataLength); // 44 bytes for WAV header
+    const view = new DataView(buffer);
+    
+    // Write WAV header
+    // "RIFF" chunk descriptor
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + dataLength, true); // file size
+    writeString(view, 8, 'WAVE');
+    
+    // "fmt " sub-chunk
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true); // sub-chunk size
+    view.setUint16(20, 1, true); // audio format (1 for PCM)
+    view.setUint16(22, numChannels, true); // number of channels
+    view.setUint32(24, sampleRate, true); // sample rate
+    view.setUint32(28, sampleRate * numChannels * 2, true); // byte rate
+    view.setUint16(32, numChannels * 2, true); // block align
+    view.setUint16(34, 16, true); // bits per sample
+    
+    // "data" sub-chunk
+    writeString(view, 36, 'data');
+    view.setUint32(40, dataLength, true); // sub-chunk size
+    
+    // Write audio data
+    let offset = 44;
+    const float32To16Bit = (sample: number) => {
+      return Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
+    };
+    
+    // Combine and interleave all channels
+    for (let i = 0; i < length; i++) {
+      for (let channel = 0; channel < numChannels; channel++) {
+        const sample = float32To16Bit(audioBuffer.getChannelData(channel)[i]);
+        view.setInt16(offset, sample, true);
+        offset += 2;
+      }
+    }
+    
+    return new Blob([buffer], { type: 'audio/wav' });
+  };
+  
+  // Helper function to write strings to DataView
+  const writeString = (view: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
   return (
     <Paper sx={{ p: 3, borderRadius: 2, bgcolor: 'rgba(10, 25, 41, 0.7)' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
@@ -950,14 +1107,34 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
                       <DownloadIcon fontSize="small" />
                     </IconButton>
                     
-                    <IconButton 
-                      size="small" 
-                      onClick={() => viewAnalysis(recording)}
-                      color="info"
-                      sx={{ p: { xs: 0.5, sm: 1 } }}
-                    >
-                      <AssessmentIcon fontSize="small" />
-                    </IconButton>
+                    <Tooltip title="View analysis">
+                      <IconButton 
+                        size="small" 
+                        onClick={() => viewAnalysis(recording)}
+                        color="info"
+                        sx={{ p: { xs: 0.5, sm: 1 } }}
+                      >
+                        <AssessmentIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    
+                    <Tooltip title="Analyze with model">
+                      <span>
+                        <IconButton 
+                          size="small" 
+                          onClick={() => analyzeRecording(recording)}
+                          color="secondary"
+                          disabled={analyzingRecordingId === recording.id}
+                          sx={{ p: { xs: 0.5, sm: 1 } }}
+                        >
+                          {analyzingRecordingId === recording.id ? (
+                            <CircularProgress size={16} color="secondary" />
+                          ) : (
+                            <AnalyticsIcon fontSize="small" />
+                          )}
+                        </IconButton>
+                      </span>
+                    </Tooltip>
                     
                     <IconButton 
                       size="small" 
