@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline, alpha } from '@mui/material';
 import AudioCapture from './components/AudioCapture';
 import EmotionDisplay from './components/EmotionDisplay';
@@ -258,6 +258,9 @@ function App() {
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.4);
   const [useSmoothing, setUseSmoothing] = useState<boolean>(true);
 
+  // Keep track of previous result to prevent infinite loops
+  const prevEmotionResultRef = useRef<EmotionResult | null>(null);
+  
   // Initialize WebSocket connection
   useEffect(() => {
     // Setup WebSocket connection
@@ -381,15 +384,27 @@ function App() {
 
   // Apply calibration to emotion results
   useEffect(() => {
-    if (emotionResult) {
-      // Use local variable instead of state
+    // Check if emotionResult actually changed meaningfully
+    const hasChanged = !prevEmotionResultRef.current || 
+      JSON.stringify(emotionResult) !== JSON.stringify(prevEmotionResultRef.current);
+    
+    // Only update if we have a result and it's different from previous
+    if (emotionResult && hasChanged) {
+      // Update the ref first
+      prevEmotionResultRef.current = emotionResult;
+      
+      // Then calculate new calibrated result
       const thresholds = loadConfidenceThresholds();
       const calibratedResult = applyCalibrationToResult(emotionResult, thresholds);
+      
+      // Update state without checking current calibratedEmotionResult
       setCalibratedEmotionResult(calibratedResult);
-    } else {
+    } else if (!emotionResult && calibratedEmotionResult !== null) {
+      // Clear the ref and state when there's no emotion result
+      prevEmotionResultRef.current = null;
       setCalibratedEmotionResult(null);
     }
-  }, [emotionResult]); // Only re-run when emotionResult changes
+  }, [emotionResult]); // Only depend on emotionResult
 
   // Handle start/stop capturing
   const toggleCapturing = async () => {
@@ -617,15 +632,22 @@ function App() {
   };
 
   // Handle calibration data updates
-  const handleCalibrationUpdate = (_: CalibrationData[]) => {
+  const handleCalibrationUpdate = useCallback((_: CalibrationData[]) => {
     // Recalibrate current result if it exists without triggering state updates
     if (emotionResult) {
       // Use local variable instead of state
       const thresholds = loadConfidenceThresholds();
       const calibratedResult = applyCalibrationToResult(emotionResult, thresholds);
+      
+      // Prevent unnecessary state updates by comparing objects
+      const prevResult = prevEmotionResultRef.current;
+      // Update the ref so we don't re-trigger the useEffect
+      prevEmotionResultRef.current = emotionResult;
+      
+      // Only update state if we need to
       setCalibratedEmotionResult(calibratedResult);
     }
-  };
+  }, [emotionResult]); // Add emotionResult to dependency array for memoization
 
   const handleEmotionSettingsChange = (settings: { confidenceThreshold: number, useSmoothing: boolean }) => {
     setConfidenceThreshold(settings.confidenceThreshold);

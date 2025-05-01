@@ -6,6 +6,9 @@ import { AudioAnalysisResult } from './audioService';
 const API_KEY = import.meta.env.VITE_HUGGINGFACE_API_KEY || ''; // Get API key from environment variables
 const MODEL_ID = 'firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3';
 
+// Debug API key (will be removed in production)
+console.log('API Key available:', !!API_KEY, 'Length:', API_KEY.length);
+
 /**
  * Analyzes audio with a pre-trained emotion recognition model
  * Uses advanced ML techniques for higher accuracy emotion detection
@@ -45,6 +48,12 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
     // Send to Hugging Face for more accurate emotion detection
     // Using the Whisper-based emotion recognition model
     try {
+      // Skip Hugging Face if no API key is available
+      if (!API_KEY) {
+        console.warn('No Hugging Face API key available, using backend results only');
+        throw new Error('No API key available');
+      }
+      
       console.log('Sending to Hugging Face for analysis...');
       
       // Convert the audio blob to base64 for API transmission
@@ -55,23 +64,62 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       );
       
       // Create a proxy endpoint through our backend to avoid CORS issues
-      const proxyResponse = await fetch('/api/proxy/huggingface', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: MODEL_ID,
-          apiKey: API_KEY,
-          audio: audioBase64
-        })
-      });
+      // Add retry logic for temporary service unavailable errors
+      let proxyResponse = null;
+      let retryCount = 0;
+      const maxRetries = 2;
       
-      if (!proxyResponse.ok) {
+      while (retryCount <= maxRetries) {
+        try {
+          proxyResponse = await fetch('/api/proxy/huggingface', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-HF-Debug': 'true' // Add debug header to track API key issues
+            },
+            body: JSON.stringify({
+              model: MODEL_ID,
+              apiKey: API_KEY.trim(), // Ensure no whitespace
+              audio: audioBase64
+            }),
+            // Add a longer timeout for the fetch request
+            signal: AbortSignal.timeout(30000) // 30 second timeout
+          });
+          
+          // Break the loop if successful or if the error is not a 503
+          if (proxyResponse.ok || proxyResponse.status !== 503) {
+            break;
+          }
+          
+          console.warn(`HuggingFace service unavailable (503), retrying attempt ${retryCount + 1}/${maxRetries}...`);
+          retryCount++;
+          
+          // Wait before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
+          
+        } catch (fetchError) {
+          console.error('Fetch error:', fetchError);
+          // If it's not a timeout or abort error, break the loop
+          if (!(fetchError instanceof DOMException && fetchError.name === 'AbortError')) {
+            break;
+          }
+          
+          console.warn(`Request timed out, retrying attempt ${retryCount + 1}/${maxRetries}...`);
+          retryCount++;
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
+        }
+      }
+      
+      // If no response after retries or response is not OK
+      if (!proxyResponse || !proxyResponse.ok) {
         console.warn('Hugging Face model request failed, using backend results');
         try {
-          const errorData = await proxyResponse.json();
-          console.error('Proxy error details:', errorData);
+          if (proxyResponse) {
+            const errorData = await proxyResponse.json();
+            console.error('Proxy error details:', errorData);
+          }
         } catch (e) {
           console.error('Failed to parse error response:', e);
         }

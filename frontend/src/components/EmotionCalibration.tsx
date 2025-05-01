@@ -54,10 +54,28 @@ const EmotionCalibration: React.FC<EmotionCalibrationProps> = ({
 
   // Save thresholds whenever they change
   useEffect(() => {
-    saveConfidenceThresholds(confidenceThresholds);
-    // Notify parent component about calibration update
-    if (onCalibrationUpdate) {
-      onCalibrationUpdate([]);
+    // Avoid saving if it's just initialization (equality check)
+    const defaultThresholds = DEFAULT_CONFIDENCE_THRESHOLDS;
+    const currentThresholds = confidenceThresholds;
+    
+    // Only save if there's an actual difference from defaults
+    const hasChanges = Object.keys(currentThresholds).some(
+      key => currentThresholds[key] !== defaultThresholds[key]
+    );
+    
+    if (hasChanges) {
+      saveConfidenceThresholds(confidenceThresholds);
+      
+      // Notify parent component about calibration update, but debounce it
+      // to prevent too many updates
+      const timer = setTimeout(() => {
+        if (onCalibrationUpdate) {
+          onCalibrationUpdate([]);
+        }
+      }, 300);
+      
+      // Clean up timeout
+      return () => clearTimeout(timer);
     }
   }, [confidenceThresholds, onCalibrationUpdate]);
 
