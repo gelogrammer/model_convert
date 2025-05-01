@@ -8,6 +8,10 @@ import App from './App.tsx'
 // Ensure Supabase service is initialized
 import './services/supabaseService'
 
+// Check environment variables
+import checkEnvironmentVariables from './utils/envCheck'
+checkEnvironmentVariables()
+
 // Create a theme
 const theme = createTheme({
   palette: {

@@ -3,7 +3,7 @@ import { AudioAnalysisResult } from './audioService';
 
 // Hidden implementation for using Hugging Face model
 // This is encapsulated in the service to prevent exposure
-const API_KEY = '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'; // Replace with your actual key in production
+const API_KEY = import.meta.env.VITE_HUGGINGFACE_API_KEY || ''; // Get API key from environment variables
 const MODEL_ID = 'firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3';
 
 /**

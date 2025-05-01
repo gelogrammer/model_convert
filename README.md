@@ -71,6 +71,19 @@ This application provides real-time feedback on speech emotion and rate using de
    npm install
    ```
 
+3. Set up environment variables:
+   ```
+   # Create a .env file in the frontend directory
+   cp .env.example .env
+   
+   # Edit the .env file and add your Hugging Face API key
+   # VITE_HUGGINGFACE_API_KEY=your_api_key_here
+   ```
+
+> **SECURITY NOTE**: Never commit API keys or sensitive tokens to the repository. 
+> Always use environment variables and keep .env files out of version control.
+> If you accidentally expose a key, rotate it immediately through the service provider.
+
 ## Running the Application
 
 ### Start the Backend
