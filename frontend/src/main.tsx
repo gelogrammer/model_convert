@@ -5,6 +5,10 @@ import CssBaseline from '@mui/material/CssBaseline'
 import './index.css'
 import App from './App.tsx'
 
+// Silence specific console messages
+import { setupConsoleSilencing } from './services/silenceConsole'
+setupConsoleSilencing()
+
 // Ensure Supabase service is initialized
 import './services/supabaseService'
 

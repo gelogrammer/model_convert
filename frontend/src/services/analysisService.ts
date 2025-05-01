@@ -1,13 +1,20 @@
 // Analysis service for audio recordings using advanced models
 import { AudioAnalysisResult } from './audioService';
+import { retrieveAuthToken, getResourceIdentifier } from './cryptoModule';
 
 // Hidden implementation for using Hugging Face model
 // This is encapsulated in the service to prevent exposure
-const API_KEY = import.meta.env.VITE_HUGGINGFACE_API_KEY || ''; // Get API key from environment variables
-const MODEL_ID = 'firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3';
 
-// Debug API key (will be removed in production)
-console.log('API Key available:', !!API_KEY, 'Length:', API_KEY.length);
+// Silent fetch utility that doesn't output to console
+const silentFetch = async (url: string, options: RequestInit): Promise<Response | null> => {
+  try {
+    // Use the original window.fetch but catch and handle any errors silently
+    return await fetch(url, options);
+  } catch (error) {
+    // Return null instead of throwing or logging to console
+    return null;
+  }
+};
 
 /**
  * Analyzes audio with a pre-trained emotion recognition model
@@ -30,31 +37,32 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
     formData.append('audio', audioBlob, 'recording.wav');
     formData.append('confidence_threshold', '0.3');
     
-    const response = await fetch('/api/analyze', {
+    const response = await silentFetch('/api/analyze', {
       method: 'POST',
       body: formData
     });
     
-    if (!response.ok) {
-      throw new Error(`Backend analysis failed: ${response.status}`);
+    if (!response || !response.ok) {
+      throw new Error(`Backend analysis failed`);
     }
     
     const backendResult = await response.json();
     
     if (backendResult.status !== 'success') {
-      throw new Error(backendResult.message || 'Analysis failed');
+      throw new Error('Analysis failed');
     }
     
     // Send to Hugging Face for more accurate emotion detection
     // Using the Whisper-based emotion recognition model
     try {
-      // Skip Hugging Face if no API key is available
-      if (!API_KEY) {
-        console.warn('No Hugging Face API key available, using backend results only');
-        throw new Error('No API key available');
-      }
+      // Get secure token and model identifier
+      const authToken = retrieveAuthToken();
+      const modelIdentifier = getResourceIdentifier();
       
-      console.log('Sending to Hugging Face for analysis...');
+      // Skip if no token is available
+      if (!authToken) {
+        throw new Error('Authentication not available');
+      }
       
       // Convert the audio blob to base64 for API transmission
       const audioArrayBuffer = await audioBlob.arrayBuffer();
@@ -71,15 +79,16 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       
       while (retryCount <= maxRetries) {
         try {
-          proxyResponse = await fetch('/api/proxy/huggingface', {
+          // Use silentFetch to prevent console errors
+          proxyResponse = await silentFetch('/api/proxy/huggingface', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'X-HF-Debug': 'true' // Add debug header to track API key issues
             },
             body: JSON.stringify({
-              model: MODEL_ID,
-              apiKey: API_KEY.trim(), // Ensure no whitespace
+              model: modelIdentifier,
+              apiKey: authToken.trim(), // Ensure no whitespace
               audio: audioBase64
             }),
             // Add a longer timeout for the fetch request
@@ -87,24 +96,17 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
           });
           
           // Break the loop if successful or if the error is not a 503
-          if (proxyResponse.ok || proxyResponse.status !== 503) {
+          if (proxyResponse && (proxyResponse.ok || proxyResponse.status !== 503)) {
             break;
           }
           
-          console.warn(`HuggingFace service unavailable (503), retrying attempt ${retryCount + 1}/${maxRetries}...`);
           retryCount++;
           
           // Wait before retrying (exponential backoff)
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
           
         } catch (fetchError) {
-          console.error('Fetch error:', fetchError);
-          // If it's not a timeout or abort error, break the loop
-          if (!(fetchError instanceof DOMException && fetchError.name === 'AbortError')) {
-            break;
-          }
-          
-          console.warn(`Request timed out, retrying attempt ${retryCount + 1}/${maxRetries}...`);
+          // Silent error handling - no console output
           retryCount++;
           
           // Wait before retrying
@@ -114,17 +116,7 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       
       // If no response after retries or response is not OK
       if (!proxyResponse || !proxyResponse.ok) {
-        console.warn('Hugging Face model request failed, using backend results');
-        try {
-          if (proxyResponse) {
-            const errorData = await proxyResponse.json();
-            console.error('Proxy error details:', errorData);
-          }
-        } catch (e) {
-          console.error('Failed to parse error response:', e);
-        }
-        
-        // If Hugging Face fails, still return backend results
+        // If external service fails, still return backend results
         return {
           emotion: backendResult.emotion,
           confidence: backendResult.confidence,
@@ -138,20 +130,17 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
         };
       }
       
-      // Process the Hugging Face model response
+      // Process the model response
       const hfResults = await proxyResponse.json();
-      console.log('Hugging Face results:', hfResults);
       
       // Transform the results to our expected format
       const emotionMap: Record<string, number> = {};
       let topEmotion = '';
       let topConfidence = 0;
       
-      // Parse emotion results from Hugging Face - format differs based on whether 
+      // Parse emotion results - format differs based on whether 
       // we're using the API or the pipeline
       const resultArray = Array.isArray(hfResults.result) ? hfResults.result : [];
-      
-      console.log('Processing result array:', resultArray);
       
       if (resultArray.length > 0) {
         resultArray.forEach((result: any) => {
@@ -170,11 +159,9 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
         });
       }
       
-      // If we have valid results from Hugging Face, use those
+      // If we have valid results, use those
       if (topEmotion && topConfidence > 0) {
-        console.log(`Using Hugging Face results: ${topEmotion} (${topConfidence})`);
-        
-        // Map the Whisper model's emotion labels to our standard format if needed
+        // Map the model's emotion labels to our standard format if needed
         const emotionMapping: Record<string, string> = {
           'neutral': 'neutral',
           'calm': 'neutral',
@@ -189,7 +176,7 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
         
         const mappedEmotion = emotionMapping[topEmotion] || topEmotion;
         
-        // Combine Hugging Face emotion detection with backend speech characteristics
+        // Combine model emotion detection with backend speech characteristics
         return {
           emotion: mappedEmotion,
           confidence: topConfidence,
@@ -201,15 +188,12 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
             pronunciation: { category: "Clear Pronunciation", confidence: 0.7 }
           }
         };
-      } else {
-        console.warn('No valid emotion detected in Hugging Face response, using backend results');
       }
-    } catch (hfError) {
-      console.error('Error with Hugging Face model:', hfError);
-      // Continue with backend results if HF fails
+    } catch (processingError) {
+      // Continue with backend results if processing fails
     }
     
-    // Fall back to backend results if Hugging Face processing fails
+    // Fall back to backend results if advanced processing fails
     return {
       emotion: backendResult.emotion,
       confidence: backendResult.confidence,
@@ -222,8 +206,6 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       }
     };
   } catch (error) {
-    console.error('Error in model analysis:', error);
-    
     // Fallback to basic emotion detection if all else fails
     return {
       emotion: 'neutral',
