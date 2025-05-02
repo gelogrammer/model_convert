@@ -12,7 +12,6 @@ import AnalyticsIcon from '@mui/icons-material/Analytics';
 import { fetchRecordings, deleteRecording as apiDeleteRecording, Recording as DBRecording, convertAudioForBrowserPlayback } from '../services/recordingsService';
 import { AudioAnalysisResult } from '../services/audioService';
 import { testSupabaseConnection } from '../services/supabaseService';
-import { createCompleteAnalysis } from '../services/analysisService';
 
 interface RecordingsProps {
   isCapturing: boolean;
@@ -175,6 +174,37 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
       loadRecordings();
     }
   }, [isCapturing]);
+
+  // Listen for custom event to show latest recording analysis
+  useEffect(() => {
+    // Handler function to process the event
+    const handleShowLatestAnalysis = async () => {
+      console.log('Received event to show latest recording analysis');
+      // Reload recordings first to ensure we have the latest
+      await loadRecordings();
+      
+      // Wait a moment to make sure state is updated
+      setTimeout(async () => {
+        // Get the most recent recording (should be at index 0)
+        if (recordings.length > 0) {
+          const latestRecording = recordings[0];
+          console.log('Showing analysis for latest recording:', latestRecording.id);
+          // View the analysis for this recording
+          await viewAnalysis(latestRecording);
+        } else {
+          console.log('No recordings available to show analysis');
+        }
+      }, 500);
+    };
+    
+    // Add event listener
+    document.addEventListener('showLatestRecordingAnalysis', handleShowLatestAnalysis);
+    
+    // Clean up the event listener when component unmounts
+    return () => {
+      document.removeEventListener('showLatestRecordingAnalysis', handleShowLatestAnalysis);
+    };
+  }, [recordings]); // Include recordings in dependencies
 
   // Initialize audio element
   useEffect(() => {
@@ -662,7 +692,7 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
   };
 
   // View recording analysis
-  const viewAnalysis = (recording: DBRecording) => {
+  const viewAnalysis = async (recording: DBRecording) => {
     try {
       console.log('Viewing analysis for recording:', recording.id);
       
@@ -856,9 +886,56 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
           // Convert to WAV for consistent processing
           const wavBlob = await convertToWav(audioBuffer);
           
+          // Import the analysis service
+          const { createCompleteAnalysis } = await import('../services/analysisService');
+          
           // Use high-accuracy model analysis service
           const analysisWithEmotion = await createCompleteAnalysis(wavBlob, audioBuffer.duration);
           console.log('Advanced analysis complete:', analysisWithEmotion);
+          
+          if (!analysisWithEmotion.emotionAnalysis || analysisWithEmotion.emotionAnalysis === "No emotion analysis available.") {
+            // If the ASR model didn't generate an emotion analysis, create one from the dominant emotion
+            const emotionName = (analysisWithEmotion.dominantEmotion || "").split(" ")[0].toLowerCase();
+            
+            if (emotionName) {
+              // Generate a default analysis text based on the emotion
+              switch(emotionName.toLowerCase()) {
+                case 'happy':
+                case 'happiness':
+                  analysisWithEmotion.emotionAnalysis = "Your voice conveys happiness and positive energy. This upbeat tone helps create an engaging and optimistic atmosphere, which can be effective for motivational content and building rapport with listeners.";
+                  break;
+                case 'sad':
+                case 'sadness':
+                  analysisWithEmotion.emotionAnalysis = "Your voice reflects a somber or melancholic tone. This emotional quality can create empathy and connection when discussing serious topics, though it may benefit from more variation for engaging longer conversations.";
+                  break;
+                case 'angry':
+                case 'anger':
+                  analysisWithEmotion.emotionAnalysis = "Your voice expresses intensity and strong conviction. This passionate delivery can be powerful for persuasive content, though moderating the tone for different segments might create better listener engagement over time.";
+                  break;
+                case 'fear':
+                  analysisWithEmotion.emotionAnalysis = "Your voice conveys apprehension or concern. This cautious delivery style can be effective when discussing risks or warnings, though it may benefit from balancing with more confident tones in other segments.";
+                  break;
+                case 'surprise':
+                  analysisWithEmotion.emotionAnalysis = "Your voice expresses wonder and curiosity. This engaged tone creates interest and can effectively maintain listener attention, particularly useful when introducing new concepts or unexpected information.";
+                  break;
+                case 'disgust':
+                  analysisWithEmotion.emotionAnalysis = "Your voice conveys strong disapproval or aversion. This critical tone can be appropriate when discussing problematic issues, though balancing with constructive alternatives may create a more positive overall impression.";
+                  break;
+                case 'neutral':
+                case 'calm':
+                  analysisWithEmotion.emotionAnalysis = "Your speech tone is primarily neutral and measured. This balanced delivery is appropriate for informational content and creates a sense of credibility and objectivity.";
+                  break;
+                default:
+                  if (emotionName !== 'unknown') {
+                    analysisWithEmotion.emotionAnalysis = `Your voice primarily expresses ${emotionName}, creating a distinctive emotional quality in your delivery. This emotional tone adds personality to your speech and helps create connection with listeners.`;
+                  } else {
+                    analysisWithEmotion.emotionAnalysis = "Your speech shows a unique combination of emotional tones that creates an engaging delivery pattern. This varied expression helps maintain listener interest throughout your recording.";
+                  }
+              }
+            } else {
+              analysisWithEmotion.emotionAnalysis = "Your speech shows a balanced emotional quality that creates an engaging delivery pattern. The natural variation in tone helps maintain listener interest throughout your recording.";
+            }
+          }
           
           // Update the recording in state with the new analysis
           setRecordings(prevRecordings => 

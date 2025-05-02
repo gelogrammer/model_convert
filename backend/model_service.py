@@ -33,11 +33,12 @@ class ModelService:
             try:
                 # Create a custom InputLayer loader to handle batch_shape issue
                 def custom_input_layer(config):
-                    # Remove batch_shape if present
+                    # Remove batch_shape if present and convert to input_shape
                     if 'batch_shape' in config:
-                        input_shape = config['batch_shape'][1:]
+                        input_shape = config['batch_shape'][1:] if len(config['batch_shape']) > 1 else (config['batch_shape'][0],)
+                        config = config.copy()  # Create a copy to avoid modifying the original
+                        config['input_shape'] = input_shape
                         del config['batch_shape']
-                        return tf.keras.layers.InputLayer(input_shape=input_shape, **config)
                     return tf.keras.layers.InputLayer(**config)
                 
                 self.model = tf.keras.models.load_model(

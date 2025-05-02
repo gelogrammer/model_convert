@@ -1,4 +1,5 @@
 import { sendAudioData } from './websocket';
+import { analyzeSpeech } from './asrService'; 
 
 // Audio context and related variables
 let audioContext: AudioContext | null = null;
@@ -16,6 +17,12 @@ let lastSendTime = 0;
 const SEND_INTERVAL = 200; // Send every 200ms to reduce server load
 let audioChunks: Float32Array[] = [];
 const MAX_CHUNKS = 5; // Limit the number of chunks to avoid memory issues
+
+// Speech analysis settings
+const ASR_ANALYSIS_INTERVAL = 2000; // Run ASR analysis every 2 seconds
+let lastAsrAnalysisTime = 0;
+const ASR_BUFFER_DURATION = 5; // Buffer 5 seconds of audio for ASR
+let asrAudioBuffer: Float32Array[] = [];
 
 // Audio recording variables
 let mediaRecorder: MediaRecorder | null = null;
@@ -540,34 +547,57 @@ export const cleanupAudio = () => {
  * Process audio data and send to server
  */
 const processAudioData = (audioData: Float32Array) => {
-  // Don't process data if not actively capturing
-  if (!isRecording) {
-    return;
-  }
-
-  // Analyze audio data
-  const { isSpeech, speechRate } = analyzeAudioData(audioData);
+  // Add data to ASR buffer for periodic analysis
+  asrAudioBuffer.push(new Float32Array(audioData));
   
-  // Only send if we detect speech with higher threshold for quality
-  if (isSpeech) {
-    // Calculate a speech quality score based on energy level
-    const energy = calculateRMS(audioData);
-    const qualityScore = Math.min(energy * 10, 1); // Normalize to 0-1
+  // Keep ASR buffer at a reasonable size
+  const maxBufferSize = Math.ceil((ASR_BUFFER_DURATION * SAMPLE_RATE) / BUFFER_SIZE);
+  while (asrAudioBuffer.length > maxBufferSize) {
+    asrAudioBuffer.shift();
+  }
+  
+  // Check if it's time to run ASR analysis
+  const now = Date.now();
+  if (now - lastAsrAnalysisTime >= ASR_ANALYSIS_INTERVAL) {
+    // Process buffer for ASR analysis
+    processAsrBuffer();
+    lastAsrAnalysisTime = now;
+  }
+  
+  // Basic audio analysis for visualization and speech detection
+  const analysisResult = analyzeAudioData(audioData);
+  
+  // If speech is detected, send to server
+  if (analysisResult.isSpeech) {
+    sendAudioDataToServer(audioData, {
+      speechRate: analysisResult.speechRate
+    });
+  }
+};
+
+/**
+ * Process the ASR audio buffer for speech analysis
+ */
+const processAsrBuffer = async () => {
+  if (asrAudioBuffer.length === 0) return;
+  
+  // Combine all buffered audio chunks
+  const totalLength = asrAudioBuffer.reduce((acc, chunk) => acc + chunk.length, 0);
+  const combinedData = new Float32Array(totalLength);
+  
+  let offset = 0;
+  asrAudioBuffer.forEach(chunk => {
+    combinedData.set(chunk, offset);
+    offset += chunk.length;
+  });
+  
+  // Send to ASR service for analysis
+  try {
+    await analyzeSpeech(combinedData);
     
-    // Only process high quality audio to avoid misclassification
-    if (qualityScore > 0.15) { // Higher threshold for better quality
-      // Include settings and quality metadata
-      const metadata = {
-        isSpeech,
-        speechRate,
-        confidenceThreshold,
-        useSmoothing,
-        qualityScore
-      };
-      
-      // Send to server
-      sendAudioDataToServer(audioData, metadata);
-    }
+    // We don't need to do anything with the result here
+  } catch (error) {
+    // Silently handle errors to avoid disrupting the audio capture
   }
 };
 

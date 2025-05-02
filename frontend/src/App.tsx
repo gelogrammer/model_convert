@@ -7,6 +7,7 @@ import Feedback from './components/Feedback';
 import SpeechCharacteristics from './components/SpeechCharacteristics';
 import EmotionCalibration from './components/EmotionCalibration';
 import Recordings from './components/Recordings';
+import SpeechMetricsDisplay from './components/SpeechMetricsDisplay';
 import { initializeWebSocket, closeWebSocket, setAudioProcessingEnabled } from './services/websocket';
 import { saveRecordingToDatabase } from './services/recordingsService';
 import './App.css';
@@ -449,6 +450,19 @@ function App() {
         // Save the recording
         try {
           await saveRecording();
+          
+          // Tell the Recordings component to show the latest recording's analysis
+          // We'll use a custom event to notify it
+          const analysisEvent = new CustomEvent('showLatestRecordingAnalysis', {
+            detail: { timestamp: new Date().toISOString() }
+          });
+          
+          // Dispatch the event after a brief delay to ensure recording is fully saved
+          setTimeout(() => {
+            document.dispatchEvent(analysisEvent);
+            console.log('Dispatched event to show latest recording analysis');
+          }, 1000);
+          
         } catch (error) {
           console.error('Error saving recording:', error);
           setSaveSuccess(false);
@@ -640,7 +654,6 @@ function App() {
       const calibratedResult = applyCalibrationToResult(emotionResult, thresholds);
       
       // Prevent unnecessary state updates by comparing objects
-      const prevResult = prevEmotionResultRef.current;
       // Update the ref so we don't re-trigger the useEffect
       prevEmotionResultRef.current = emotionResult;
       
@@ -907,6 +920,15 @@ function App() {
                   />
                 </Paper>
               </Box>
+
+              {/* Add Speech Metrics Display when capturing */}
+              {isCapturing && (
+                <Box sx={{ mb: { xs: 2, md: 4 } }}>
+                  <Paper sx={{ p: { xs: 2, md: 3 } }}>
+                    <SpeechMetricsDisplay />
+                  </Paper>
+                </Box>
+              )}
 
               <Box sx={{ 
                 display: 'grid', 

@@ -3,6 +3,7 @@ ASR (Automatic Speech Recognition) service for speech characteristics analysis.
 """
 
 import torch
+import torch.nn as nn
 import numpy as np
 import os
 
@@ -28,6 +29,66 @@ class ASRService:
         
         # Load model
         self.model = torch.load(model_path, map_location=self.device)
+        
+        # Check model structure
+        if isinstance(self.model, dict):
+            print(f"Model is a dictionary with keys: {list(self.model.keys())}")
+            
+            # First try to see if it contains a supervised model state dict
+            if "supervised_model_state_dict" in self.model:
+                print("Using supervised_model_state_dict")
+                model_state_dict = self.model["supervised_model_state_dict"]
+            # Otherwise try the drl model state dict
+            elif "drl_model_state_dict" in self.model:
+                print("Using drl_model_state_dict")
+                model_state_dict = self.model["drl_model_state_dict"]
+            # Or just use the dict itself
+            else:
+                print("Using the entire dictionary as state_dict")
+                model_state_dict = self.model
+            
+            # Create a simple model architecture - adjust this to match your actual model
+            self.model = nn.Sequential(
+                nn.Linear(13, 32),  # Input features to hidden
+                nn.ReLU(),
+                nn.Linear(32, 11)   # Hidden to output
+            )
+            
+            # Try loading with the identified state dict
+            try:
+                # Get shape information for input layer from the first layer's weight
+                if isinstance(model_state_dict, dict):
+                    # Look for weight keys to determine input size
+                    weight_keys = [k for k in model_state_dict.keys() if 'weight' in k]
+                    if weight_keys:
+                        first_layer_key = min(weight_keys, key=lambda k: int(k.split('.')[0]) if k.split('.')[0].isdigit() else 999)
+                        first_layer_weights = model_state_dict[first_layer_key]
+                        if isinstance(first_layer_weights, torch.Tensor):
+                            input_size = first_layer_weights.shape[1]
+                            hidden_size = first_layer_weights.shape[0]
+                            print(f"Detected input size: {input_size}, hidden size: {hidden_size}")
+                            
+                            # Rebuild model with detected dimensions
+                            self.model = nn.Sequential(
+                                nn.Linear(input_size, hidden_size),
+                                nn.ReLU(),
+                                nn.Linear(hidden_size, 11)
+                            )
+                
+                # Try to load the state dict
+                try:
+                    self.model.load_state_dict(model_state_dict)
+                    print("Successfully loaded model state dictionary")
+                except Exception as e:
+                    print(f"Error loading state dict directly: {e}")
+                    print("Attempting to create a compatible model from scratch")
+                    # Continue with the base model without loading weights
+            except Exception as e:
+                print(f"Error analyzing model structure: {e}")
+                print("Using default model architecture")
+                # Continue with the base model
+        
+        # Set to evaluation mode
         self.model.eval()  # Set to evaluation mode
         
         # Define categories

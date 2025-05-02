@@ -154,16 +154,37 @@ def analyze_audio():
         else:
             message = f"Emotion detected with confidence: {confidence:.2f}"
         
-        # Calculate speech rate
-        speech_rate = audio_processor.calculate_speech_rate(audio_data)
-        
         # Get speech characteristics from ASR if available
         speech_characteristics = {}
+        speech_rate = 0
+        
         if asr_service:
             try:
+                # Get speech characteristics from ASR model
                 speech_characteristics = asr_service.process_audio(features)
+                
+                # Use ASR model for more accurate speech rate analysis
+                # This will override the basic speech rate calculation
+                if speech_characteristics:
+                    # Calculate speech rate based on the tempo category from ASR
+                    tempo_category = speech_characteristics.get("tempo", {}).get("category", "Medium Tempo")
+                    
+                    # Map tempo categories to approximate words per minute values
+                    if tempo_category == "Fast Tempo":
+                        speech_rate = 150 + (20 * speech_characteristics["tempo"]["confidence"])
+                    elif tempo_category == "Slow Tempo":
+                        speech_rate = 90 - (20 * speech_characteristics["tempo"]["confidence"])
+                    else: # Medium Tempo
+                        speech_rate = 120
+                    
+                    print(f"Speech rate determined from ASR: {speech_rate} WPM (Category: {tempo_category})")
             except Exception as e:
                 print(f"Error in ASR processing: {e}")
+        
+        # If ASR failed to provide speech rate, fall back to basic calculation
+        if speech_rate == 0:
+            speech_rate = audio_processor.calculate_speech_rate(audio_data)
+            print(f"Using fallback speech rate: {speech_rate}")
         
         response = {
             "status": "success",
@@ -180,6 +201,13 @@ def analyze_audio():
         if speech_characteristics:
             response["speech_characteristics"] = speech_characteristics
             
+        # Save the analysis result to the database
+        try:
+            # TODO: Implement database saving here
+            print("Analysis complete - result available for database saving")
+        except Exception as save_error:
+            print(f"Warning: Failed to save analysis to database: {save_error}")
+        
         return jsonify(response)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

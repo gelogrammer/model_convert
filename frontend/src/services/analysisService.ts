@@ -1,6 +1,14 @@
 // Analysis service for audio recordings using advanced models
 import { AudioAnalysisResult } from './audioService';
 import { retrieveAuthToken, getResourceIdentifier } from './cryptoModule';
+import { 
+  getSpeechMetricsHistory, 
+  getSpeechRateMetrics, 
+  getAverageSpeechMetrics,
+  FLUENCY_CATEGORIES,
+  TEMPO_CATEGORIES,
+  PRONUNCIATION_CATEGORIES
+} from './asrService';
 
 // Hidden implementation for using Hugging Face model
 // This is encapsulated in the service to prevent exposure
@@ -14,6 +22,174 @@ const silentFetch = async (url: string, options: RequestInit): Promise<Response 
     // Return null instead of throwing or logging to console
     return null;
   }
+};
+
+// Speech metrics tracking container
+export interface SpeechMetricsContainer {
+  overallMetrics: {
+    averageRate: number;
+    fluencyScore: number;
+    tempoScore: number;
+    pronunciationScore: number;
+    overallScore: number;
+  };
+  timeSeriesData: {
+    timestamp: Date;
+    speechRate: number;
+    fluencyCategory: string;
+    tempoCategory: string;
+    pronunciationCategory: string;
+  }[];
+  categoryDistribution: {
+    fluency: Record<string, number>;
+    tempo: Record<string, number>;
+    pronunciation: Record<string, number>;
+  };
+}
+
+// Create a metrics container with default values
+const createDefaultMetricsContainer = (): SpeechMetricsContainer => ({
+  overallMetrics: {
+    averageRate: 120,
+    fluencyScore: 70,
+    tempoScore: 70,
+    pronunciationScore: 70,
+    overallScore: 70,
+  },
+  timeSeriesData: [],
+  categoryDistribution: {
+    fluency: FLUENCY_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: 0 }), {}),
+    tempo: TEMPO_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: 0 }), {}),
+    pronunciation: PRONUNCIATION_CATEGORIES.reduce((acc, cat) => ({ ...acc, [cat]: 0 }), {})
+  }
+});
+
+// Metrics container for tracking speech analysis results
+let metricsContainer: SpeechMetricsContainer = createDefaultMetricsContainer();
+
+/**
+ * Get the current speech metrics container
+ */
+export const getSpeechMetricsContainer = (): SpeechMetricsContainer => {
+  // Update metrics container with latest data
+  updateMetricsContainer();
+  return { ...metricsContainer };
+};
+
+/**
+ * Reset the speech metrics container
+ */
+export const resetSpeechMetricsContainer = (): void => {
+  metricsContainer = createDefaultMetricsContainer();
+};
+
+/**
+ * Update metrics container with latest data from speech metrics history
+ */
+const updateMetricsContainer = (): void => {
+  // Get metrics history
+  const metricsHistory = getSpeechMetricsHistory();
+  
+  if (metricsHistory.length === 0) {
+    return;
+  }
+  
+  // Get speech rate metrics
+  const rateMetrics = getSpeechRateMetrics();
+  
+  // Get average speech metrics
+  const avgMetrics = getAverageSpeechMetrics();
+  
+  // Update time series data (limit to 100 points for performance)
+  const historyToUse = metricsHistory.slice(-100);
+  metricsContainer.timeSeriesData = historyToUse.map(m => ({
+    timestamp: m.timestamp,
+    speechRate: m.speechRate,
+    fluencyCategory: m.fluency,
+    tempoCategory: m.tempo,
+    pronunciationCategory: m.pronunciation
+  }));
+  
+  // Calculate category distributions
+  const fluencyCounts: Record<string, number> = {};
+  const tempoCounts: Record<string, number> = {};
+  const pronunciationCounts: Record<string, number> = {};
+  
+  // Initialize all categories with 0
+  FLUENCY_CATEGORIES.forEach(cat => fluencyCounts[cat] = 0);
+  TEMPO_CATEGORIES.forEach(cat => tempoCounts[cat] = 0);
+  PRONUNCIATION_CATEGORIES.forEach(cat => pronunciationCounts[cat] = 0);
+  
+  // Count occurrences
+  historyToUse.forEach(m => {
+    fluencyCounts[m.fluency] = (fluencyCounts[m.fluency] || 0) + 1;
+    tempoCounts[m.tempo] = (tempoCounts[m.tempo] || 0) + 1;
+    pronunciationCounts[m.pronunciation] = (pronunciationCounts[m.pronunciation] || 0) + 1;
+  });
+  
+  // Calculate percentages
+  const totalCount = historyToUse.length;
+  
+  metricsContainer.categoryDistribution = {
+    fluency: Object.entries(fluencyCounts).reduce((acc, [cat, count]) => {
+      return { ...acc, [cat]: count / totalCount };
+    }, {}),
+    tempo: Object.entries(tempoCounts).reduce((acc, [cat, count]) => {
+      return { ...acc, [cat]: count / totalCount };
+    }, {}),
+    pronunciation: Object.entries(pronunciationCounts).reduce((acc, [cat, count]) => {
+      return { ...acc, [cat]: count / totalCount };
+    }, {})
+  };
+  
+  // Calculate fluency score
+  const fluencyScore = calculateScoreFromCategory(
+    avgMetrics.fluency.category,
+    {
+      "High Fluency": 85,
+      "Medium Fluency": 70,
+      "Low Fluency": 55
+    }
+  );
+  
+  // Calculate tempo score
+  const tempoScore = calculateScoreFromCategory(
+    avgMetrics.tempo.category,
+    {
+      "Fast Tempo": 85,
+      "Medium Tempo": 75,
+      "Slow Tempo": 65
+    }
+  );
+  
+  // Calculate pronunciation score
+  const pronunciationScore = calculateScoreFromCategory(
+    avgMetrics.pronunciation.category,
+    {
+      "Clear Pronunciation": 85,
+      "Unclear Pronunciation": 60
+    }
+  );
+  
+  // Update overall metrics
+  metricsContainer.overallMetrics = {
+    averageRate: rateMetrics.averageRate,
+    fluencyScore,
+    tempoScore,
+    pronunciationScore,
+    overallScore: (fluencyScore + tempoScore + pronunciationScore) / 3
+  };
+};
+
+/**
+ * Calculate score based on category
+ */
+const calculateScoreFromCategory = (
+  category: string,
+  scoreMap: Record<string, number>,
+  defaultScore: number = 70
+): number => {
+  return scoreMap[category] || defaultScore;
 };
 
 /**
