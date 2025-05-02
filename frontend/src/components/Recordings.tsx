@@ -1037,36 +1037,18 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
 
   return (
     <Paper sx={{ p: 3, borderRadius: 2, bgcolor: 'rgba(10, 25, 41, 0.7)' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-        <Typography variant="h5" component="h2">
-          Recordings
-          {hasBackendIssues && (
-            <Tooltip title="Backend connection issues detected">
-              <WarningAmberIcon color="warning" sx={{ ml: 1, verticalAlign: 'middle' }} />
-            </Tooltip>
-          )}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h6" component="h2">
+          Recording History
         </Typography>
-        <Box>
-          <Tooltip title="Test database connection">
-            <IconButton 
-              size="small" 
-              onClick={() => {
-                setConnectionDialogOpen(true);
-                checkSupabaseConnection();
-              }}
-              sx={{ mr: 1 }}
-            >
-              <SettingsIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Button 
-            size="small" 
-            onClick={loadRecordings} 
-            disabled={loading || isCapturing}
-          >
-            Refresh
-          </Button>
-        </Box>
+        <Button 
+          variant="outlined" 
+          size="small" 
+          onClick={loadRecordings}
+          startIcon={<SettingsIcon fontSize="small" />}
+        >
+          Refresh
+        </Button>
       </Box>
       
       {/* Connection status dialog */}
@@ -1158,7 +1140,25 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
           </Button>
         </Box>
       ) : recordings.length > 0 ? (
-        <List sx={{ flexGrow: 1, overflowY: 'auto' }}>
+        <List sx={{ 
+          flexGrow: 1, 
+          overflowY: 'auto',
+          maxHeight: '600px', // Significantly increased maximum height to show more recordings
+          '&::-webkit-scrollbar': {
+            width: '8px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'rgba(0, 0, 0, 0.1)',
+            borderRadius: '4px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: 'rgba(255, 255, 255, 0.2)',
+            borderRadius: '4px',
+            '&:hover': {
+              backgroundColor: 'rgba(255, 255, 255, 0.3)',
+            }
+          }
+        }}>
           {recordings.map((recording, index) => (
             <Box key={recording.id}>
               <ListItem

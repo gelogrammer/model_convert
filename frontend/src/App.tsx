@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline, alpha } from '@mui/material';
-import AudioCapture from './components/AudioCapture';
 import EmotionDisplay from './components/EmotionDisplay';
 import SpeechTempoDisplay from './components/SpeechRateDisplay';
 import Feedback from './components/Feedback';
@@ -196,7 +195,8 @@ const applyCalibrationToResult = (
   return rawResult;
 };
 
-// Load confidence thresholds from local storage
+// Function not used anymore since we removed EmotionCalibration
+/* 
 const loadConfidenceThresholds = (): Record<string, number> => {
   try {
     const savedThresholds = localStorage.getItem('emotionConfidenceThresholds');
@@ -224,6 +224,7 @@ const loadConfidenceThresholds = (): Record<string, number> => {
     };
   }
 };
+*/
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -247,10 +248,6 @@ function App() {
   // Store last speech characteristics to keep displaying them even when not speaking
   const [lastSpeechCharacteristics, setLastSpeechCharacteristics] = useState<EmotionResult['speech_characteristics'] | null>(null);
   
-  // Settings for emotion classification
-  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.4);
-  const [useSmoothing, setUseSmoothing] = useState<boolean>(true);
-
   // Keep track of previous result to prevent infinite loops
   const prevEmotionResultRef = useRef<EmotionResult | null>(null);
   
@@ -380,7 +377,7 @@ function App() {
     };
   }, []);
 
-  // Apply calibration to emotion results
+  // Apply calibration to emotion results (using default thresholds since we removed the calibration UI)
   useEffect(() => {
     // Check if emotionResult actually changed meaningfully
     const hasChanged = !prevEmotionResultRef.current || 
@@ -391,9 +388,19 @@ function App() {
       // Update the ref first
       prevEmotionResultRef.current = emotionResult;
       
-      // Then calculate new calibrated result
-      const thresholds = loadConfidenceThresholds();
-      const calibratedResult = applyCalibrationToResult(emotionResult, thresholds);
+      // Use default thresholds since we removed the calibration functionality
+      const defaultThresholds = {
+        anger: 0.6,
+        disgust: 0.6,
+        fear: 0.6,
+        happiness: 0.6,
+        sadness: 0.6,
+        surprise: 0.6,
+        neutral: 0.5,
+      };
+      
+      // Calculate new calibrated result
+      const calibratedResult = applyCalibrationToResult(emotionResult, defaultThresholds);
       
       // Update state without checking current calibratedEmotionResult
       setCalibratedEmotionResult(calibratedResult);
@@ -651,15 +658,36 @@ function App() {
     };
   };
 
-  const handleEmotionSettingsChange = (settings: { confidenceThreshold: number, useSmoothing: boolean }) => {
-    setConfidenceThreshold(settings.confidenceThreshold);
-    setUseSmoothing(settings.useSmoothing);
+  const handleEmotionSettingsChange = (_: { confidenceThreshold: number, useSmoothing: boolean }) => {
+    // These variables are used by EmotionDisplay component
+    // No need to set local state anymore since we removed AudioCapture component
   };
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <div className="App" style={{ minHeight: '100vh', backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.05) 0%, rgba(6, 182, 212, 0.05) 90%)' }}>
+      <div className="App" style={{ 
+        minHeight: '100vh', 
+        position: 'relative',
+        backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.1) 0%, rgba(6, 182, 212, 0.1) 90%)', 
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed',
+        zIndex: 0
+      }}>
+        {/* Background effect that is visually in the background */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          opacity: 0.3,
+          zIndex: -1,
+          background: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.15) 0%, rgba(6, 182, 212, 0.15) 90%)',
+          pointerEvents: 'none'
+        }}></div>
+
         <AppBar position="fixed" elevation={0}>
           <Toolbar sx={{ height: { xs: 64, md: 80 }, px: { xs: 1, md: 2 } }}>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -893,13 +921,14 @@ function App() {
                 gap: { xs: 2, md: 4 },
                 mb: { xs: 2, md: 4 }
               }}>
-                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
-                  <AudioCapture 
-                    isCapturing={isCapturing} 
-                    isConnected={isConnected}
-                    confidenceThreshold={confidenceThreshold}
-                    useSmoothing={useSmoothing}
-                  />
+                <Paper sx={{ 
+                  p: { xs: 2, md: 3 }, 
+                  height: '100%',
+                  minHeight: '700px', // Added minimum height for the recordings container
+                  display: 'flex',
+                  flexDirection: 'column'
+                }}>
+                  <Recordings isCapturing={isCapturing} />
                 </Paper>
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <EmotionDisplay
@@ -963,12 +992,6 @@ function App() {
                 </Paper>
                 {/* Add an empty column for grid balance */}
                 <Box sx={{ display: { xs: 'none', lg: 'block' } }} />
-              </Box>
-              
-              <Box sx={{ mb: { xs: 2, md: 4 } }}>
-                <Paper sx={{ p: { xs: 2, md: 3 } }}>
-                  <Recordings isCapturing={isCapturing} />
-                </Paper>
               </Box>
             </>
           )}
