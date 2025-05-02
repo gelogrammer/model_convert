@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline, alpha } from '@mui/material';
 import AudioCapture from './components/AudioCapture';
 import EmotionDisplay from './components/EmotionDisplay';
 import SpeechTempoDisplay from './components/SpeechRateDisplay';
 import Feedback from './components/Feedback';
 import SpeechCharacteristics from './components/SpeechCharacteristics';
-import EmotionCalibration from './components/EmotionCalibration';
+//import EmotionCalibration from './components/EmotionCalibration';
 import Recordings from './components/Recordings';
 import { initializeWebSocket, closeWebSocket, setAudioProcessingEnabled } from './services/websocket';
 import { saveRecordingToDatabase } from './services/recordingsService';
@@ -173,16 +173,6 @@ interface EmotionResult {
   };
   belowThreshold?: boolean;
   filteredEmotion?: string;
-}
-
-// Local interface for calibration data
-interface CalibrationData {
-  emotion: string;
-  userFeedback: {
-    correctness: 'correct' | 'incorrect' | 'unsure';
-    actualEmotion?: string;
-  };
-  timestamp: number;
 }
 
 // Helper function to apply calibration thresholds
@@ -661,23 +651,6 @@ function App() {
     };
   };
 
-  // Handle calibration data updates
-  const handleCalibrationUpdate = useCallback((_: CalibrationData[]) => {
-    // Recalibrate current result if it exists without triggering state updates
-    if (emotionResult) {
-      // Use local variable instead of state
-      const thresholds = loadConfidenceThresholds();
-      const calibratedResult = applyCalibrationToResult(emotionResult, thresholds);
-      
-      // Prevent unnecessary state updates by comparing objects
-      // Update the ref so we don't re-trigger the useEffect
-      prevEmotionResultRef.current = emotionResult;
-      
-      // Only update state if we need to
-      setCalibratedEmotionResult(calibratedResult);
-    }
-  }, [emotionResult]); // Add emotionResult to dependency array for memoization
-
   const handleEmotionSettingsChange = (settings: { confidenceThreshold: number, useSmoothing: boolean }) => {
     setConfidenceThreshold(settings.confidenceThreshold);
     setUseSmoothing(settings.useSmoothing);
@@ -966,13 +939,14 @@ function App() {
                     tempoConfidence={isCapturing ? emotionResult?.speech_characteristics?.tempo?.confidence : undefined}
                   />
                 </Paper>
+                {/* Emotion Calibration component commented out as requested
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <EmotionCalibration
                     emotionResult={isCapturing ? emotionResult : null}
                     isCapturing={isCapturing}
-                    onCalibrationUpdate={handleCalibrationUpdate}
                   />
                 </Paper>
+                */}
               </Box>
               
               <Box sx={{ 
