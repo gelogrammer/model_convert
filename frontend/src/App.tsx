@@ -7,7 +7,6 @@ import Feedback from './components/Feedback';
 import SpeechCharacteristics from './components/SpeechCharacteristics';
 import EmotionCalibration from './components/EmotionCalibration';
 import Recordings from './components/Recordings';
-import SpeechMetricsDisplay from './components/SpeechMetricsDisplay';
 import { initializeWebSocket, closeWebSocket, setAudioProcessingEnabled } from './services/websocket';
 import { saveRecordingToDatabase } from './services/recordingsService';
 import './App.css';
@@ -255,6 +254,9 @@ function App() {
   const speechTimeoutRef = useRef<number | null>(null);
   const [calibratedEmotionResult, setCalibratedEmotionResult] = useState<EmotionResult | null>(null);
   
+  // Store last speech characteristics to keep displaying them even when not speaking
+  const [lastSpeechCharacteristics, setLastSpeechCharacteristics] = useState<EmotionResult['speech_characteristics'] | null>(null);
+  
   // Settings for emotion classification
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.4);
   const [useSmoothing, setUseSmoothing] = useState<boolean>(true);
@@ -309,14 +311,19 @@ function App() {
                 window.clearTimeout(speechTimeoutRef.current);
               }
               
-              // Set a new timeout to reset speaking state if no speech is detected for 3 seconds
+              // Set a new timeout to reset speaking state if no speech is detected for 1.5 seconds
               speechTimeoutRef.current = window.setTimeout(() => {
                 setIsSpeaking(false);
                 speechTimeoutRef.current = null;
-              }, 3000);
+              }, 1500);
             }
             
-            // Show processing indicator for 500ms
+            // Update speech characteristics immediately even if no speech detected
+            if (result.speech_characteristics) {
+              setLastSpeechCharacteristics(result.speech_characteristics);
+            }
+            
+            // Show processing indicator for 300ms (reduced from 500ms)
             setProcessingPacket(true);
             if (processingTimeoutRef.current) {
               window.clearTimeout(processingTimeoutRef.current);
@@ -325,7 +332,7 @@ function App() {
             processingTimeoutRef.current = window.setTimeout(() => {
               setProcessingPacket(false);
               processingTimeoutRef.current = null;
-            }, 500);
+            }, 300);
           },
           onError: (err) => {
             setError(err.message);
@@ -406,6 +413,20 @@ function App() {
       setCalibratedEmotionResult(null);
     }
   }, [emotionResult]); // Only depend on emotionResult
+
+  // Update last speech characteristics when new data is received
+  useEffect(() => {
+    if (emotionResult && emotionResult.speech_characteristics) {
+      setLastSpeechCharacteristics(emotionResult.speech_characteristics);
+    }
+  }, [emotionResult]);
+
+  // Clear last speech characteristics when capturing stops
+  useEffect(() => {
+    if (!isCapturing) {
+      setLastSpeechCharacteristics(null);
+    }
+  }, [isCapturing]);
 
   // Handle start/stop capturing
   const toggleCapturing = async () => {
@@ -615,13 +636,8 @@ function App() {
       fluency = 'Low Fluency';
     }
     
-    // Format tempo using ASR model's exact terminology
-    let tempo = 'Medium Tempo';
-    if (characteristics.tempo.category.toLowerCase().includes('fast')) {
-      tempo = 'Fast Tempo';
-    } else if (characteristics.tempo.category.toLowerCase().includes('slow')) {
-      tempo = 'Slow Tempo';
-    }
+    // Use the original tempo category directly from the ASR model
+    const tempo = characteristics.tempo.category;
     
     // Format pronunciation using ASR model's exact terminology
     let pronunciation = 'Clear Pronunciation';
@@ -921,11 +937,17 @@ function App() {
                 </Paper>
               </Box>
 
-              {/* Add Speech Metrics Display when capturing */}
+              {/* Show Speech Characteristics whenever capturing, regardless of speech detection */}
               {isCapturing && (
                 <Box sx={{ mb: { xs: 2, md: 4 } }}>
                   <Paper sx={{ p: { xs: 2, md: 3 } }}>
-                    <SpeechMetricsDisplay />
+                    <SpeechCharacteristics
+                      characteristics={formatSpeechCharacteristics(emotionResult?.speech_characteristics || lastSpeechCharacteristics)}
+                      isCapturing={isCapturing}
+                      noPaper={true}
+                      showLastDetectedMessage={!emotionResult?.speech_characteristics && !!lastSpeechCharacteristics}
+                      showWaitingMessage={true}
+                    />
                   </Paper>
                 </Box>
               )}
@@ -940,6 +962,8 @@ function App() {
                   <SpeechTempoDisplay
                     speechRate={isCapturing ? emotionResult?.speech_rate : undefined}
                     isCapturing={isCapturing}
+                    tempoCategory={isCapturing ? emotionResult?.speech_characteristics?.tempo?.category : undefined}
+                    tempoConfidence={isCapturing ? emotionResult?.speech_characteristics?.tempo?.confidence : undefined}
                   />
                 </Paper>
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
@@ -957,20 +981,14 @@ function App() {
                 gap: { xs: 2, md: 4 },
                 mb: { xs: 2, md: 4 }
               }}>
-                {emotionResult?.speech_characteristics && isCapturing && (
-                  <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
-                    <SpeechCharacteristics
-                      characteristics={formatSpeechCharacteristics(emotionResult.speech_characteristics)}
-                      isCapturing={isCapturing}
-                    />
-                  </Paper>
-                )}
                 <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
                   <Feedback
                     emotionResult={isCapturing ? calibratedEmotionResult : null}
                     isCapturing={isCapturing}
                   />
                 </Paper>
+                {/* Add an empty column for grid balance */}
+                <Box sx={{ display: { xs: 'none', lg: 'block' } }} />
               </Box>
               
               <Box sx={{ mb: { xs: 2, md: 4 } }}>

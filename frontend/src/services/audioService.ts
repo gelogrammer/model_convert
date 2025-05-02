@@ -19,9 +19,9 @@ let audioChunks: Float32Array[] = [];
 const MAX_CHUNKS = 5; // Limit the number of chunks to avoid memory issues
 
 // Speech analysis settings
-const ASR_ANALYSIS_INTERVAL = 2000; // Run ASR analysis every 2 seconds
+const ASR_ANALYSIS_INTERVAL = 1000; // Run ASR analysis every 1 second (was 2000ms)
 let lastAsrAnalysisTime = 0;
-const ASR_BUFFER_DURATION = 5; // Buffer 5 seconds of audio for ASR
+const ASR_BUFFER_DURATION = 3; // Buffer 3 seconds of audio for ASR (was 5 seconds)
 let asrAudioBuffer: Float32Array[] = [];
 
 // Audio recording variables
