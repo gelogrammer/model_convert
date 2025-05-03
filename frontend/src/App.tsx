@@ -974,6 +974,7 @@ function App() {
                       noPaper={true}
                       showLastDetectedMessage={!emotionResult?.speech_characteristics && !!lastSpeechCharacteristics}
                       showWaitingMessage={true}
+                      useASRModel={true}
                     />
                   </Paper>
                 </Box>
