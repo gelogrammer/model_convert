@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Paper, Typography, Box, Slider, FormControlLabel, Switch, Chip, Alert } from '@mui/material';
+import { Paper, Typography, Box, Slider, FormControlLabel, Switch, Chip, Alert, IconButton, Popover } from '@mui/material';
 import { Bar } from 'react-chartjs-2';
+import SettingsIcon from '@mui/icons-material/Settings';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -9,6 +10,8 @@ import {
   Title,
   Tooltip,
   Legend,
+  PointElement,
+  LineElement,
   ChartData
 } from 'chart.js';
 
@@ -17,6 +20,8 @@ ChartJS.register(
   CategoryScale,
   LinearScale,
   BarElement,
+  PointElement,
+  LineElement,
   Title,
   Tooltip,
   Legend
@@ -70,6 +75,7 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
   const [lastValidResult, setLastValidResult] = useState<EmotionResult | null>(null);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.4);
   const [useSmoothing, setUseSmoothing] = useState<boolean>(true);
+  const [settingsAnchorEl, setSettingsAnchorEl] = useState<HTMLButtonElement | null>(null);
 
   // Update last valid result when we get a new emotion result
   useEffect(() => {
@@ -86,6 +92,13 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
     if (chartRef.current) {
       chartRef.current.update();
     }
+    
+    // Clean up chart instance when component unmounts
+    return () => {
+      if (chartRef.current && chartRef.current.chart) {
+        chartRef.current.chart.destroy();
+      }
+    };
   }, [emotionResult, lastValidResult]);
 
   // Notify parent component when settings change
@@ -196,8 +209,21 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
       y: {
         beginAtZero: true,
         max: 1,
+        ticks: {
+          padding: 5,
+        }
       },
+      x: {
+        ticks: {
+          padding: 5
+        }
+      }
     },
+    layout: {
+      padding: {
+        bottom: 15
+      }
+    }
   };
 
   // Handle confidence threshold change
@@ -210,13 +236,25 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
     setUseSmoothing(event.target.checked);
   };
 
+  // Handle settings button click
+  const handleSettingsClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setSettingsAnchorEl(event.currentTarget);
+  };
+
+  const handleSettingsClose = () => {
+    setSettingsAnchorEl(null);
+  };
+
+  const settingsOpen = Boolean(settingsAnchorEl);
+  const settingsId = settingsOpen ? 'settings-popover' : undefined;
+
   // Get status alert if any
   const getStatusAlert = () => {
     if (!emotionResult) return null;
     
     if (emotionResult.status === 'warning' || emotionResult.status === 'error') {
       return (
-        <Alert severity={emotionResult.status} sx={{ mb: 2 }}>
+        <Alert severity={emotionResult.status} sx={{ mb: 1, py: 0.5 }}>
           {emotionResult.message}
         </Alert>
       );
@@ -227,22 +265,27 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
 
   // Get emotion chips display
   const renderEmotionChips = () => {
-    if (!emotionResult || !emotionResult.probabilities) return null;
-    
+    // Use emotionResult if available, otherwise use lastValidResult or default empty values
+    const result = emotionResult || lastValidResult || { 
+      probabilities: {} as Record<string, number>, 
+      emotion: '' 
+    };
     const emotions = ['disgust', 'neutral', 'anger', 'sadness', 'happiness', 'surprise', 'fear'];
     
     return (
-      <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+      <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'center' }}>
         {emotions.map(emotion => (
           <Chip
             key={emotion}
-            label={`${emotion}: ${((emotionResult.probabilities[emotion] || 0) * 100).toFixed(1)}%`}
+            label={`${emotion}: ${((result.probabilities?.[emotion] || 0) * 100).toFixed(1)}%`}
             size="small"
             sx={{
-              backgroundColor: emotion === emotionResult.emotion 
+              height: '20px',
+              fontSize: '0.7rem',
+              backgroundColor: emotion === result.emotion 
                 ? emotionColors[emotion as keyof typeof emotionColors].replace('0.7', '0.9')
                 : 'rgba(30, 41, 59, 0.8)',
-              color: emotion === emotionResult.emotion ? '#000' : '#fff'
+              color: emotion === result.emotion ? '#000' : '#fff'
             }}
           />
         ))}
@@ -250,12 +293,12 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
     );
   };
 
-  // Determine display state
+  // Determine display content
   const getDisplayContent = () => {
     if (!isCapturing) {
       return (
         <>
-          <Typography variant="body1" sx={{ mb: 2, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ textAlign: 'center', fontStyle: 'italic', my: 1 }}>
             Press START CAPTURE to detect emotions
           </Typography>
           {renderChart(true)}
@@ -275,7 +318,7 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
     if (lastValidResult && isCapturing) {
       return (
         <>
-          <Typography sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ textAlign: 'center', fontStyle: 'italic', my: 1 }}>
             Waiting for speech...
           </Typography>
           {renderChart()}
@@ -285,7 +328,7 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
     
     return (
       <>
-        <Typography sx={{ mb: 2 }}>
+        <Typography variant="body2" sx={{ textAlign: 'center', fontStyle: 'italic', my: 1 }}>
           No speech detected yet
         </Typography>
         {renderChart()}
@@ -295,9 +338,19 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
 
   // Helper to render chart
   const renderChart = (inactive = false) => (
-    <Box sx={{ height: 200, mt: 2, mb: 2 }}>
+    <Box sx={{ 
+      height: 220, 
+      mt: 1, 
+      mb: 1,
+      pb: 2, // Add bottom padding
+      position: 'relative',
+      '& canvas': {
+        marginBottom: '10px !important'
+      }
+    }}>
       <Bar 
         ref={chartRef}
+        key={`emotion-chart-${isCapturing ? 'active' : 'inactive'}`}
         data={getChartData()} 
         options={inactive ? { ...options, animation: false } : options} 
         style={inactive ? { opacity: 0.5 } : undefined}
@@ -307,15 +360,16 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
 
   // Render settings section
   const renderSettings = () => (
-    <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
-      <Typography variant="subtitle2" align="center" gutterBottom>
-        Classification Settings
-      </Typography>
+    <Box sx={{ p: 2, width: 250 }}>
+      <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Settings</Typography>
       
-      <Box sx={{ px: 1 }}>
-        <Typography variant="body2" align="center" gutterBottom>
-          Confidence Threshold: {(confidenceThreshold * 100).toFixed(0)}%
-        </Typography>
+      <Box sx={{ mb: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+          <Typography variant="caption">
+            Threshold: {(confidenceThreshold * 100).toFixed(0)}%
+          </Typography>
+        </Box>
+        
         <Slider
           value={confidenceThreshold}
           onChange={handleConfidenceChange}
@@ -323,63 +377,65 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
           max={0.9}
           step={0.05}
           sx={{ 
-            mb: 2,
+            width: '100%',
+            height: 4,
             '& .MuiSlider-thumb': {
               backgroundColor: '#7C3AED',
+              width: 12,
+              height: 12,
             },
             '& .MuiSlider-track': {
               backgroundColor: '#7C3AED',
+              height: 4,
+            },
+            '& .MuiSlider-rail': {
+              height: 4,
             }
           }}
         />
-        
-        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-          <FormControlLabel
-            control={
-              <Switch 
-                checked={useSmoothing} 
-                onChange={handleSmoothingChange}
-                size="small"
-                sx={{
-                  '& .Mui-checked': {
-                    color: '#7C3AED',
-                  },
-                  '& .Mui-checked + .MuiSwitch-track': {
-                    backgroundColor: '#7C3AED',
-                  }
-                }}
-              />
-            }
-            label={
-              <Typography variant="body2">
-                Enable temporal smoothing
-              </Typography>
-            }
-          />
-        </Box>
       </Box>
+      
+      <FormControlLabel
+        control={
+          <Switch 
+            checked={useSmoothing} 
+            onChange={handleSmoothingChange}
+            size="small"
+            sx={{
+              '& .Mui-checked': {
+                color: '#7C3AED',
+              },
+              '& .Mui-checked + .MuiSwitch-track': {
+                backgroundColor: '#7C3AED',
+              }
+            }}
+          />
+        }
+        label={
+          <Typography variant="caption">
+            Smoothing
+          </Typography>
+        }
+      />
     </Box>
   );
 
   // Get emotion details display
   const getEmotionDetails = () => {
     if (!emotionResult) {
-      if (isCapturing) {
-        return (
-          <Typography variant="body1" align="center" sx={{ my: 1 }}>
-            Waiting for speech...
-          </Typography>
-        );
-      }
-      return null;
+      // Always display the emotion chips even when there's no result
+      return renderEmotionChips();
     }
     
     // Make sure probabilities exist
     if (!emotionResult.probabilities) {
       return (
-        <Typography variant="body1" align="center" sx={{ my: 1 }}>
-          Processing speech...
-        </Typography>
+        <>
+          <Typography variant="body2" align="center" sx={{ my: 0.5, fontStyle: 'italic' }}>
+            Processing speech...
+          </Typography>
+          {renderEmotionChips()}
+        </>
       );
     }
     
@@ -389,29 +445,21 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
     const filterStatus = emotionResult.belowThreshold ? 'uncertain' : emotionResult.emotion;
     
     return (
-      <Box sx={{ textAlign: 'center', mt: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-          <Typography variant="body1">
-            Detected emotion: {emotionResult.emotion}
+      <Box sx={{ textAlign: 'center', mt: 0.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+          <Typography variant="subtitle2">
+            {emotionResult.emotion}
           </Typography>
           <Chip 
-            label={`${confidenceLevel} confidence`} 
+            label={`${confidenceLevel}`} 
             color={confidenceLevel === "Low" ? "warning" : "success"}
             size="small"
-            sx={{ fontSize: '0.7rem' }}
+            sx={{ fontSize: '0.65rem', height: '18px', px: 0.5 }}
           />
         </Box>
         
-        <Typography variant="body2" sx={{ mt: 0.5 }}>
-          Confidence: {confidenceValue}%
-        </Typography>
-        
-        <Typography variant="body2" sx={{ mb: 1 }}>
-          Filtered result: {filterStatus}
-        </Typography>
-        
-        <Typography variant="body2" sx={{ mt: 1, fontWeight: 'bold' }}>
-          All emotions:
+        <Typography variant="caption" display="block" sx={{ opacity: 0.9 }}>
+          Confidence: {confidenceValue}% • Filtered: {filterStatus}
         </Typography>
         
         {renderEmotionChips()}
@@ -420,20 +468,72 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
   };
 
   return (
-    <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6">
+    <Paper sx={{ 
+      p: 2, 
+      height: '100%', 
+      display: 'flex', 
+      flexDirection: 'column',
+      maxWidth: '100%',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+      borderRadius: 2,
+      overflow: 'visible'
+    }}>
+      <Box sx={{ 
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+        pb: 0.5,
+        mb: 1,
+      }}>
+        <Typography 
+          variant="subtitle1" 
+          sx={{ 
+            textAlign: 'center', 
+            fontWeight: 500
+          }}
+        >
           Emotion Recognition
         </Typography>
+        <IconButton 
+          size="small" 
+          sx={{ position: 'absolute', right: 0 }}
+          onClick={handleSettingsClick}
+          aria-describedby={settingsId}
+        >
+          <SettingsIcon fontSize="small" />
+        </IconButton>
+        
+        <Popover
+          id={settingsId}
+          open={settingsOpen}
+          anchorEl={settingsAnchorEl}
+          onClose={handleSettingsClose}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'right',
+          }}
+          transformOrigin={{
+            vertical: 'top',
+            horizontal: 'right',
+          }}
+        >
+          {renderSettings()}
+        </Popover>
       </Box>
       
       {getEmotionDetails()}
       
-      <Box sx={{ flexGrow: 1 }}>
+      <Box sx={{ 
+        flexGrow: 1, 
+        minHeight: 250, 
+        display: 'flex', 
+        flexDirection: 'column', 
+        overflowY: 'visible'
+      }}>
         {getDisplayContent()}
       </Box>
-      
-      {renderSettings()}
     </Paper>
   );
 };

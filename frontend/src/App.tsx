@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline, alpha } from '@mui/material';
 import EmotionDisplay from './components/EmotionDisplay';
-import SpeechTempoDisplay from './components/SpeechRateDisplay';
+// import SpeechTempoDisplay from './components/SpeechRateDisplay';
 import Feedback from './components/Feedback';
 import SpeechCharacteristics from './components/SpeechCharacteristics';
 //import EmotionCalibration from './components/EmotionCalibration';
@@ -71,7 +71,7 @@ const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 16
+    borderRadius: 12
   },
   components: {
     MuiPaper: {
@@ -91,7 +91,7 @@ const theme = createTheme({
           textTransform: 'none',
           fontWeight: 600,
           borderRadius: 12,
-          padding: '12px 28px',
+          padding: '10px 24px',
           '@media (max-width:600px)': {
             padding: '8px 16px',
           },
@@ -121,9 +121,9 @@ const theme = createTheme({
     MuiToolbar: {
       styleOverrides: {
         root: {
-          height: 80,
+          height: 64,
           '@media (max-width:600px)': {
-            height: 64,
+            height: 56,
             padding: '0 8px',
           },
         }
@@ -673,7 +673,9 @@ function App() {
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'fixed',
-        zIndex: 0
+        zIndex: 0,
+        display: 'flex',
+        flexDirection: 'column'
       }}>
         {/* Background effect that is visually in the background */}
         <div style={{
@@ -689,18 +691,18 @@ function App() {
         }}></div>
 
         <AppBar position="fixed" elevation={0}>
-          <Toolbar sx={{ height: { xs: 64, md: 80 }, px: { xs: 1, md: 2 } }}>
+          <Toolbar sx={{ height: { xs: 54, md: 60 }, px: { xs: 1, md: 2 } }}>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <Box 
                 sx={{ 
-                  width: { xs: 32, md: 40 }, 
-                  height: { xs: 32, md: 40 }, 
-                  borderRadius: { xs: '8px', md: '12px' }, 
+                  width: { xs: 28, md: 36 }, 
+                  height: { xs: 28, md: 36 }, 
+                  borderRadius: { xs: '8px', md: '10px' }, 
                   background: 'linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  mr: { xs: 1, md: 2 }
+                  mr: { xs: 1, md: 1 }
                 }}
               >
                 <Typography variant="h6" sx={{ color: 'white', fontSize: { xs: '0.8rem', md: '1rem' }, m: 0, p: 0 }}>TW</Typography>
@@ -715,7 +717,8 @@ function App() {
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   mr: 2,
-                  display: { xs: 'none', sm: 'block' }
+                  display: { xs: 'none', sm: 'block' },
+                  fontSize: { xs: '1.2rem', md: '1.3rem' }
                 }}
               >
                 Talk.twahnalyzer
@@ -725,14 +728,14 @@ function App() {
             <Box sx={{ flexGrow: 1 }} />
             
             {/* Connection status indicator */}
-            <Box sx={{ display: 'flex', alignItems: 'center', mr: { xs: 0.5, md: 2 } }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mr: { xs: 0.5, md: 1 } }}>
               <Badge
                 color={isConnected ? "success" : "error"}
                 variant="dot"
                 sx={{ 
                   '& .MuiBadge-badge': { 
-                    width: { xs: 8, md: 12 }, 
-                    height: { xs: 8, md: 12 },
+                    width: { xs: 8, md: 10 }, 
+                    height: { xs: 8, md: 10 },
                     borderRadius: '50%',
                     animation: isConnected && processingPacket ? 'pulse 1s infinite' : 'none',
                     '@keyframes pulse': {
@@ -746,15 +749,15 @@ function App() {
                 <Box sx={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  py: { xs: 0.4, md: 0.75 }, 
-                  px: { xs: 1, md: 2 }, 
+                  py: { xs: 0.4, md: 0.5 }, 
+                  px: { xs: 1, md: 1.5 }, 
                   borderRadius: '8px',
                   backgroundColor: isConnected ? alpha(theme.palette.success.main, 0.1) : alpha(theme.palette.error.main, 0.1)
                 }}>
                   <Typography variant="body2" sx={{ 
                     color: isConnected ? theme.palette.success.main : theme.palette.error.main,
                     fontWeight: 600,
-                    fontSize: { xs: '0.65rem', md: '0.8rem' }
+                    fontSize: { xs: '0.65rem', md: '0.75rem' }
                   }}>
                     {isConnected ? 'Connected' : 'Disconnected'}
                   </Typography>
@@ -766,12 +769,12 @@ function App() {
             {lastUpdateTime && (
               <Box sx={{ 
                 backgroundColor: alpha(theme.palette.background.paper, 0.3),
-                py: 0.75, 
-                px: 2, 
+                py: 0.5, 
+                px: 1.5, 
                 borderRadius: '8px',
                 display: { xs: 'none', md: 'block' }
               }}>
-                <Typography variant="body2" sx={{ color: theme.palette.text.secondary }}>
+                <Typography variant="body2" sx={{ color: theme.palette.text.secondary, fontSize: '0.75rem' }}>
                   Last update: {getLastUpdateText()}
                 </Typography>
               </Box>
@@ -791,7 +794,9 @@ function App() {
               borderRadius: theme.shape.borderRadius,
               backgroundColor: alpha(theme.palette.warning.main, 0.15),
               color: theme.palette.warning.main,
-              border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`
+              border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
+              py: 0.5,
+              minHeight: 'auto'
             }}
           >
             {reconnectAttempt > 0 
@@ -815,7 +820,9 @@ function App() {
               borderRadius: theme.shape.borderRadius,
               backgroundColor: alpha(saveSuccess ? theme.palette.success.main : theme.palette.error.main, 0.15),
               color: saveSuccess ? theme.palette.success.main : theme.palette.error.main,
-              border: `1px solid ${alpha(saveSuccess ? theme.palette.success.main : theme.palette.error.main, 0.3)}`
+              border: `1px solid ${alpha(saveSuccess ? theme.palette.success.main : theme.palette.error.main, 0.3)}`,
+              py: 0.5,
+              minHeight: 'auto'
             }}
           >
             {saveSuccess 
@@ -826,11 +833,14 @@ function App() {
         </Snackbar>
 
         <Container disableGutters maxWidth="lg" sx={{ 
-          pt: { xs: 10, sm: 12, md: 12 }, 
-          pb: { xs: 4, md: 6 }, 
-          px: { xs: 1, sm: 2, md: 4 },
+          pt: { xs: 7, sm: 8, md: 8 }, 
+          pb: { xs: 1, md: 2 }, 
+          px: { xs: 1, sm: 2, md: 3 },
           position: 'relative',
-          zIndex: 1
+          zIndex: 1,
+          flexGrow: 1,
+          display: 'flex',
+          flexDirection: 'column'
         }}>
           {loading ? (
             <Box sx={{ 
@@ -851,7 +861,7 @@ function App() {
             </Box>
           ) : error ? (
             <Paper sx={{ 
-              p: { xs: 2, md: 4 }, 
+              p: { xs: 2, md: 3 }, 
               textAlign: 'center', 
               backgroundColor: alpha(theme.palette.error.main, 0.1),
               borderRadius: theme.shape.borderRadius,
@@ -870,8 +880,7 @@ function App() {
           ) : (
             <>
               <Box sx={{ 
-                mb: { xs: 3, md: 5 }, 
-                mt: { xs: 4, md: 4 }, 
+                mb: { xs: 1.5, md: 2 }, 
                 display: 'flex', 
                 justifyContent: 'center', 
                 position: 'relative',
@@ -883,17 +892,19 @@ function App() {
                   color={isCapturing ? "error" : "primary"}
                   disabled={!isConnected || !isModelInitialized}
                   onClick={toggleCapturing}
-                  size="large"
+                  size="medium"
                   sx={{ 
-                    px: { xs: 2, md: 4 }, 
-                    py: { xs: 1.2, md: 2 }, 
-                    fontSize: { xs: '0.9rem', md: '1.1rem' },
+                    px: { xs: 2, md: 3 }, 
+                    py: { xs: 0.8, md: 1 }, 
+                    fontSize: { xs: '0.85rem', md: '0.95rem' },
                     position: 'relative',
-                    minWidth: { xs: '80%', sm: '60%', md: 'auto' },
+                    minWidth: { xs: '40%', sm: '30%', md: 'auto' },
                     overflow: 'hidden',
                     zIndex: 1000,
-                    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.5)',
+                    boxShadow: '0 6px 12px rgba(0, 0, 0, 0.4)',
                     border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '50px',
+                    fontWeight: 700,
                     '&::before': isCapturing ? {} : {
                       content: '""',
                       position: 'absolute',
@@ -916,33 +927,32 @@ function App() {
               </Box>
 
               <Box sx={{ 
-                display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', sm: '1fr', lg: '1fr 1fr' }, 
-                gap: { xs: 2, md: 4 },
-                mb: { xs: 2, md: 4 }
+                display: 'flex', 
+                flexDirection: { xs: 'column', md: 'row' },
+                gap: { xs: 1, md: 1.5 },
+                flexGrow: 1,
+                overflow: 'auto',
+                height: { xs: 'auto', md: 'calc(100vh - 180px)' },
+                maxHeight: { md: '650px' },
+                mx: { xs: 0.5, md: 0 }
               }}>
-                <Paper sx={{ 
-                  p: { xs: 2, md: 3 }, 
-                  height: '100%',
-                  minHeight: '700px', // Added minimum height for the recordings container
-                  display: 'flex',
-                  flexDirection: 'column'
+                {/* Left column: Speech Characteristics (was Recordings) */}
+                <Box sx={{ 
+                  width: { xs: '100%', md: '27%', lg: '25%' },
+                  height: { xs: 'auto', md: '100%' }
                 }}>
-                  <Recordings isCapturing={isCapturing} />
-                </Paper>
-                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
-                  <EmotionDisplay
-                    emotionResult={isCapturing && isSpeaking ? emotionResult : null}
-                    isCapturing={isCapturing}
-                    onSettingsChange={handleEmotionSettingsChange}
-                  />
-                </Paper>
-              </Box>
-
-              {/* Show Speech Characteristics whenever capturing, regardless of speech detection */}
-              {isCapturing && (
-                <Box sx={{ mb: { xs: 2, md: 4 } }}>
-                  <Paper sx={{ p: { xs: 2, md: 3 } }}>
+                  <Paper sx={{ 
+                    p: { xs: 0.75, md: 1.25 }, 
+                    height: '100%',
+                    minHeight: { xs: '200px', md: '240px' },
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                  }}>
                     <SpeechCharacteristics
                       characteristics={formatSpeechCharacteristics(emotionResult?.speech_characteristics || lastSpeechCharacteristics)}
                       isCapturing={isCapturing}
@@ -952,46 +962,60 @@ function App() {
                     />
                   </Paper>
                 </Box>
-              )}
-
-              <Box sx={{ 
-                display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', sm: '1fr', lg: '1fr 1fr' }, 
-                gap: { xs: 2, md: 4 },
-                mb: { xs: 2, md: 4 }
-              }}>
-                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
-                  <SpeechTempoDisplay
-                    speechRate={isCapturing ? emotionResult?.speech_rate : undefined}
-                    isCapturing={isCapturing}
-                    tempoCategory={isCapturing ? emotionResult?.speech_characteristics?.tempo?.category : undefined}
-                    tempoConfidence={isCapturing ? emotionResult?.speech_characteristics?.tempo?.confidence : undefined}
-                  />
-                </Paper>
-                {/* Emotion Calibration component commented out as requested
-                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
-                  <EmotionCalibration
-                    emotionResult={isCapturing ? emotionResult : null}
-                    isCapturing={isCapturing}
-                  />
-                </Paper>
-                */}
-              </Box>
-              
-              <Box sx={{ 
-                display: 'grid', 
-                gridTemplateColumns: { xs: '1fr', sm: '1fr', lg: '1fr 1fr' }, 
-                gap: { xs: 2, md: 4 },
-                mb: { xs: 2, md: 4 }
-              }}>
-                <Paper sx={{ p: { xs: 2, md: 3 }, height: '100%' }}>
-                  <Feedback
-                    emotionResult={isCapturing ? calibratedEmotionResult : null}
-                    isCapturing={isCapturing}
-                  />
-                </Paper>
-                {/* Add an empty column for grid balance */}
-                <Box sx={{ display: { xs: 'none', lg: 'block' } }} />
+                
+                {/* Middle column: Emotion Display and Recordings (was Speech Characteristics) */}
+                <Box sx={{ 
+                  width: { xs: '100%', md: '46%', lg: '50%' },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: { xs: 1, md: 1.5 }
+                }}>
+                  <Paper sx={{ 
+                    p: { xs: 0.75, md: 1.25 },
+                    borderRadius: '12px',
+                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                  }}>
+                    <EmotionDisplay
+                      emotionResult={isCapturing && isSpeaking ? emotionResult : null}
+                      isCapturing={isCapturing}
+                      onSettingsChange={handleEmotionSettingsChange}
+                    />
+                  </Paper>
+                  
+                  {/* Show Recordings (was Speech Characteristics) */}
+                  <Paper sx={{ 
+                    p: { xs: 0.75, md: 1.25 },
+                    borderRadius: '12px',
+                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
+                    display: isCapturing ? 'none' : 'block'
+                  }}>
+                    <Recordings isCapturing={isCapturing} />
+                  </Paper>
+                </Box>
+                
+                {/* Right column: Feedback */}
+                <Box sx={{ 
+                  width: { xs: '100%', md: '27%', lg: '25%' },
+                  height: { xs: 'auto', md: '100%' }
+                }}>
+                  <Paper sx={{ 
+                    p: { xs: 0.75, md: 1.25 }, 
+                    height: '100%',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                  }}>
+                    <Feedback
+                      emotionResult={isCapturing ? calibratedEmotionResult : null}
+                      isCapturing={isCapturing}
+                    />
+                  </Paper>
+                </Box>
               </Box>
             </>
           )}
@@ -1001,13 +1025,13 @@ function App() {
         <Box 
           component="footer" 
           sx={{ 
-            py: { xs: 1.5, md: 3 }, 
+            py: { xs: 0.75, md: 1 }, 
             textAlign: 'center', 
             borderTop: '1px solid rgba(255, 255, 255, 0.05)',
             mt: 'auto'
           }}
         >
-          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', md: '0.8rem' } }}>
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', md: '0.7rem' } }}>
             Real-Time Speech Analysis • Powered by AI
           </Typography>
         </Box>
