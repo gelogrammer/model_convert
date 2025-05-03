@@ -15,9 +15,11 @@ import { testSupabaseConnection, saveViewAnalysis } from '../services/supabaseSe
 
 interface RecordingsProps {
   isCapturing: boolean;
+  recordingToAnalyze?: number | string | null;
+  onAnalysisComplete?: (id: number | string) => void;
 }
 
-const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
+const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze, onAnalysisComplete }) => {
   const [recordings, setRecordings] = useState<DBRecording[]>([]);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
@@ -175,26 +177,81 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
     }
   }, [isCapturing]);
 
+  // Watch for changes to recordingToAnalyze prop and trigger analysis
+  useEffect(() => {
+    const analyzeRecordingById = async () => {
+      if (recordingToAnalyze && !isCapturing && recordings.length > 0) {
+        console.log(`Attempting to analyze recording with ID: ${recordingToAnalyze}`);
+        
+        // Find the recording by ID (which could be a number or string)
+        const recordingToProcess = recordings.find(rec => 
+          rec.id === recordingToAnalyze || 
+          rec.id === Number(recordingToAnalyze) || 
+          String(rec.id) === String(recordingToAnalyze)
+        );
+        
+        if (recordingToProcess) {
+          console.log(`Found recording to analyze: ${recordingToProcess.file_name}`);
+          await analyzeRecording(recordingToProcess);
+          
+          // Notify that analysis is complete
+          if (onAnalysisComplete) {
+            onAnalysisComplete(recordingToProcess.id);
+          }
+        } else {
+          console.log(`Recording with ID ${recordingToAnalyze} not found. Available recordings:`, 
+            recordings.map(r => ({ id: r.id, name: r.file_name })));
+            
+          // Load recordings and try again once
+          console.log('Loading recordings to try finding the recording again...');
+          await loadRecordings();
+        }
+      }
+    };
+    
+    analyzeRecordingById();
+  }, [recordingToAnalyze, recordings, isCapturing, onAnalysisComplete]);
+
   // Listen for custom event to show latest recording analysis
   useEffect(() => {
     // Handler function to process the event
     const handleShowLatestAnalysis = async () => {
       console.log('Received event to show latest recording analysis');
-      // Reload recordings first to ensure we have the latest
-      await loadRecordings();
       
-      // Wait a moment to make sure state is updated
-      setTimeout(async () => {
-        // Get the most recent recording (should be at index 0)
-        if (recordings.length > 0) {
-          const latestRecording = recordings[0];
-          console.log('Showing analysis for latest recording:', latestRecording.id);
-          // Analyze the latest recording with the model
-          await analyzeRecording(latestRecording);
-        } else {
-          console.log('No recordings available to show analysis');
-        }
-      }, 500);
+      try {
+        // Reload recordings first to ensure we have the latest
+        console.log('Loading latest recordings for analysis...');
+        await loadRecordings();
+        
+        // Wait a moment to make sure state is updated
+        setTimeout(async () => {
+          // Get the most recent recording (should be at index 0)
+          if (recordings && recordings.length > 0) {
+            const latestRecording = recordings[0];
+            console.log('Found latest recording for analysis:', latestRecording.id, latestRecording.file_name);
+            
+            // Analyze the latest recording with the model
+            await analyzeRecording(latestRecording);
+          } else {
+            console.log('No recordings available to show analysis');
+            // Try once more after a longer delay
+            setTimeout(async () => {
+              console.log('Retrying to find recordings after longer delay');
+              await loadRecordings();
+              
+              if (recordings && recordings.length > 0) {
+                const latestRecording = recordings[0];
+                console.log('Found latest recording on second attempt:', latestRecording.id);
+                await analyzeRecording(latestRecording);
+              } else {
+                console.log('Still no recordings found after retry');
+              }
+            }, 2000);
+          }
+        }, 1000); // Increased from 500ms to 1000ms for better reliability
+      } catch (error) {
+        console.error('Error handling latest recording analysis:', error);
+      }
     };
     
     // Add event listener
@@ -849,7 +906,21 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
           // Display the analysis
           setSelectedAnalysis(analysisWithEmotion);
           setSelectedRecordingName(`${recording.file_name} - ${analysisWithEmotion.dominantEmotion}`);
+          console.log('Analysis complete, displaying dialog for recording:', recording.id);
           setAnalysisDialogOpen(true);
+          
+          // Make sure dialog is visible by force-checking it after a short delay
+          setTimeout(() => {
+            if (!analysisDialogOpen) {
+              console.log('Dialog not visible, forcing it open');
+              setAnalysisDialogOpen(true);
+            }
+          }, 500);
+          
+          // Notify parent component that analysis is complete
+          if (onAnalysisComplete) {
+            onAnalysisComplete(recording.id);
+          }
           
         } catch (decodeErr) {
           console.error('Failed to decode audio data:', decodeErr);

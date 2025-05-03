@@ -259,7 +259,7 @@ const calculateActualDuration = async (blob: Blob): Promise<number> => {
 };
 
 // Save recording to the database using Supabase with localStorage fallback
-export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean> => {
+export const saveRecordingToDatabase = async (emotionData: any): Promise<{ success: boolean, recordingId?: number | string }> => {
   try {
     console.log('Starting saveRecordingToDatabase with emotion data:', emotionData);
     
@@ -272,12 +272,12 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
     
     if (!recordedBlob) {
       console.error('No recorded audio blob available - make sure recording is stopped properly');
-      return false;
+      return { success: false };
     }
     
     if (recordedBlob.size === 0) {
       console.error('Audio recording is empty (0 bytes) - check microphone access');
-      return false;
+      return { success: false };
     }
     
     // Log the blob details
@@ -490,7 +490,7 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
               }
               
               supabaseSuccess = true;
-              return true; // Return early on success
+              return { success: true, recordingId: altData.id };
             }
           } catch (altError) {
             console.error('Alternative upload method failed:', altError);
@@ -511,7 +511,7 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
           }
           
           supabaseSuccess = true;
-          return true; // Return early on success
+          return { success: true, recordingId: data.id };
         } else {
           console.error('Supabase upload returned no data');
           // Continue to localStorage fallback
@@ -607,17 +607,17 @@ export const saveRecordingToDatabase = async (emotionData: any): Promise<boolean
         localStorage.setItem('audioRecordings', JSON.stringify([localRecording, ...existingRecordings]));
         
         console.log('Successfully saved to localStorage as fallback');
-        return true;
+        return { success: true, recordingId: `local_${Date.now()}` };
       } catch (localStorageError) {
         console.error('Error saving to localStorage:', localStorageError);
-        return false;
+        return { success: false };
       }
     }
     
-    return supabaseSuccess;
+    return { success: supabaseSuccess, recordingId: undefined };
   } catch (error) {
     console.error('Error saving recording:', error);
-    return false;
+    return { success: false };
   }
 };
 

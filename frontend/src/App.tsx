@@ -239,6 +239,7 @@ function App() {
   const [showReconnecting, setShowReconnecting] = useState(false);
   const [processingPacket, setProcessingPacket] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean | null>(null);
+  const [latestRecordingId, setLatestRecordingId] = useState<number | string | null>(null);
   const processingTimeoutRef = useRef<number | null>(null);
   
   // Speech detection timeout
@@ -436,6 +437,9 @@ function App() {
         speechTimeoutRef.current = null;
       }
       
+      // Reset latest recording ID - we'll set it again after saving
+      setLatestRecordingId(null);
+      
       // Disable audio processing
       setAudioProcessingEnabled(false);
       
@@ -467,19 +471,18 @@ function App() {
         
         // Save the recording
         try {
-          await saveRecording();
+          const recordingId = await saveRecording();
           
-          // Tell the Recordings component to show the latest recording's analysis
-          // We'll use a custom event to notify it
-          const analysisEvent = new CustomEvent('showLatestRecordingAnalysis', {
-            detail: { timestamp: new Date().toISOString() }
-          });
+          console.log('Recording saved successfully with ID:', recordingId);
           
-          // Dispatch the event after a brief delay to ensure recording is fully saved
-          setTimeout(() => {
-            document.dispatchEvent(analysisEvent);
-            console.log('Dispatched event to show latest recording analysis');
-          }, 1000);
+          // No need for custom event - we'll use the state directly
+          if (recordingId) {
+            // Use a timeout to make sure recordings are loaded first
+            setTimeout(() => {
+              setLatestRecordingId(recordingId);
+              console.log('Set latest recording ID for analysis:', recordingId);
+            }, 500);
+          }
           
         } catch (error) {
           console.error('Error saving recording:', error);
@@ -580,18 +583,21 @@ function App() {
       try {
         console.log('Saving recording with emotion data:', emotionResult || {});
         // Save recording to database using API, provide empty object if emotionResult is null
-        const success = await saveRecordingToDatabase(emotionResult || {});
+        const result = await saveRecordingToDatabase(emotionResult || {});
         
-        if (success) {
-          console.log('Recording saved successfully (either to Supabase or localStorage)');
+        if (result && result.success) {
+          console.log('Recording saved successfully (either to Supabase or localStorage) with ID:', result.recordingId);
+          setLatestRecordingId(result.recordingId || null);
           setSaveSuccess(true);
           // Clear success message after 5 seconds
           setTimeout(() => setSaveSuccess(null), 5000);
+          return result.recordingId;
         } else {
           console.error('Failed to save recording - could not save to either Supabase or localStorage');
           setSaveSuccess(false);
           // Clear error message after 5 seconds
           setTimeout(() => setSaveSuccess(null), 5000);
+          return null;
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -600,11 +606,13 @@ function App() {
         setSaveSuccess(false);
         // Clear error message after 5 seconds
         setTimeout(() => setSaveSuccess(null), 5000);
+        return null;
       }
     } catch (error) {
       console.error('Error loading audio service modules:', error);
       setSaveSuccess(false);
       setTimeout(() => setSaveSuccess(null), 5000);
+      return null;
     }
   };
 
@@ -661,6 +669,13 @@ function App() {
   const handleEmotionSettingsChange = (_: { confidenceThreshold: number, useSmoothing: boolean }) => {
     // These variables are used by EmotionDisplay component
     // No need to set local state anymore since we removed AudioCapture component
+  };
+
+  // Handle analysis completion
+  const handleAnalysisComplete = (id: number | string) => {
+    console.log(`Analysis completed for recording ID: ${id}`);
+    // Reset the latest recording ID
+    setLatestRecordingId(null);
   };
 
   return (
@@ -993,7 +1008,11 @@ function App() {
                     boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
                     display: isCapturing ? 'none' : 'block'
                   }}>
-                    <Recordings isCapturing={isCapturing} />
+                    <Recordings 
+                      isCapturing={isCapturing} 
+                      recordingToAnalyze={latestRecordingId}
+                      onAnalysisComplete={handleAnalysisComplete}
+                    />
                   </Paper>
                 </Box>
                 
