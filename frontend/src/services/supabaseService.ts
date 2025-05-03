@@ -701,6 +701,97 @@ export const saveAudioAnalysis = async (analysisData: AudioAnalysisData) => {
   }
 };
 
+// Save analysis data to the audio_analysis table
+export const saveViewAnalysis = async (analysisData: any) => {
+  try {
+    console.log('Saving audio analysis to Supabase:', analysisData);
+    
+    // Parse the confidence from the dominant emotion string (e.g., "Happy (85%)")
+    let emotionConfidence = 0;
+    let dominantEmotion = "Unknown";
+    
+    if (analysisData.dominantEmotion) {
+      // Extract the emotion name without the percentage part
+      dominantEmotion = analysisData.dominantEmotion.split(' ')[0];
+      
+      // Extract the confidence percentage if available
+      if (analysisData.dominantEmotion.match(/\((\d+)%\)/)) {
+        emotionConfidence = parseFloat(analysisData.dominantEmotion.match(/\((\d+)%\)/)[1]) / 100;
+      }
+    }
+    
+    // Insert the analysis data into the audio_analysis table
+    const { data, error } = await supabase
+      .from('audio_analysis')
+      .insert([
+        {
+          recording_id: analysisData.recording_id,
+          duration: analysisData.duration || 0,
+          average_volume: analysisData.averageVolume || 0,
+          peak_volume: analysisData.peakVolume || 0,
+          silence_duration: analysisData.silenceDuration || 0,
+          speech_rate: Math.round(analysisData.speechRate) || 0,
+          word_count: analysisData.wordCount || 0,
+          fluency: analysisData.speechRateCategory?.fluency || 'Medium Fluency',
+          tempo: analysisData.speechRateCategory?.tempo || 'Medium Tempo',
+          pronunciation: analysisData.speechRateCategory?.pronunciation || 'Clear Pronunciation',
+          audio_clarity: analysisData.audioQuality?.clarity || 0.7,
+          noise_level: analysisData.audioQuality?.noiseLevel || 0.3,
+          distortion: analysisData.audioQuality?.distortion || 0.1,
+          dominant_emotion: dominantEmotion,
+          emotion_confidence: emotionConfidence,
+          segments: analysisData.segments || []
+        }
+      ])
+      .select();
+    
+    if (error) {
+      // If the record already exists (due to the unique constraint), perform an update instead
+      if (error.code === '23505') {  // Unique violation code
+        console.log('Recording analysis already exists, updating instead...');
+        
+        const { data: updateData, error: updateError } = await supabase
+          .from('audio_analysis')
+          .update({
+            duration: analysisData.duration || 0,
+            average_volume: analysisData.averageVolume || 0,
+            peak_volume: analysisData.peakVolume || 0,
+            silence_duration: analysisData.silenceDuration || 0,
+            speech_rate: Math.round(analysisData.speechRate) || 0,
+            word_count: analysisData.wordCount || 0,
+            fluency: analysisData.speechRateCategory?.fluency || 'Medium Fluency',
+            tempo: analysisData.speechRateCategory?.tempo || 'Medium Tempo',
+            pronunciation: analysisData.speechRateCategory?.pronunciation || 'Clear Pronunciation',
+            audio_clarity: analysisData.audioQuality?.clarity || 0.7,
+            noise_level: analysisData.audioQuality?.noiseLevel || 0.3,
+            distortion: analysisData.audioQuality?.distortion || 0.1,
+            dominant_emotion: dominantEmotion,
+            emotion_confidence: emotionConfidence,
+            segments: analysisData.segments || [],
+            updated_at: new Date().toISOString()
+          })
+          .eq('recording_id', analysisData.recording_id)
+          .select();
+          
+        if (updateError) {
+          console.error('Error updating audio analysis:', updateError);
+          return { data: null, error: updateError };
+        }
+        
+        return { data: updateData, error: null };
+      }
+      
+      console.error('Error saving audio analysis:', error);
+      return { data: null, error };
+    }
+    
+    return { data, error: null };
+  } catch (error) {
+    console.error('Exception saving audio analysis:', error);
+    return { data: null, error };
+  }
+};
+
 // Test Supabase connection status
 export const testSupabaseConnection = async (): Promise<{ connected: boolean; message: string }> => {
   try {

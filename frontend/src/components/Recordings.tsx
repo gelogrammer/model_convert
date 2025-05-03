@@ -11,7 +11,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import { fetchRecordings, deleteRecording as apiDeleteRecording, Recording as DBRecording, convertAudioForBrowserPlayback } from '../services/recordingsService';
 import { AudioAnalysisResult } from '../services/audioService';
-import { testSupabaseConnection } from '../services/supabaseService';
+import { testSupabaseConnection, saveViewAnalysis } from '../services/supabaseService';
 
 interface RecordingsProps {
   isCapturing: boolean;
@@ -189,8 +189,8 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
         if (recordings.length > 0) {
           const latestRecording = recordings[0];
           console.log('Showing analysis for latest recording:', latestRecording.id);
-          // View the analysis for this recording
-          await viewAnalysis(latestRecording);
+          // Analyze the latest recording with the model
+          await analyzeRecording(latestRecording);
         } else {
           console.log('No recordings available to show analysis');
         }
@@ -691,147 +691,36 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
     return recording ? recording.file_name : 'Recording';
   };
 
-  // View recording analysis
-  const viewAnalysis = async (recording: DBRecording) => {
-    try {
-      console.log('Viewing analysis for recording:', recording.id);
-      
-      // Extract analysis data from emotion_data
-      const analysis = recording.emotion_data?.audioAnalysis || null;
-      
-      if (!analysis) {
-        console.warn('No analysis data available for this recording');
-        setError('No analysis data available for this recording');
-        return;
-      }
-      
-      // Determine dominant emotion
-      let dominantEmotion = "Unknown";
-      let emotionAnalysis = "No emotion analysis available.";
-      
-      try {
-        const emotionData = recording.emotion_data || {};
-        
-        // Try different possible emotion data structures
-        let emotions = emotionData.emotions;
-        
-        if (!emotions || Object.keys(emotions).length === 0) {
-          // Check for direct emotion properties
-          const rootEmotions: Record<string, number> = {};
-          const emotionKeys = ['happy', 'sad', 'angry', 'fear', 'surprise', 'disgust', 'neutral', 'calm'];
-          
-          emotionKeys.forEach(key => {
-            if (typeof (emotionData as Record<string, any>)[key] === 'number') {
-              rootEmotions[key] = (emotionData as Record<string, any>)[key];
-            } else if (typeof (emotionData as Record<string, any>)[`${key}_prob`] === 'number') {
-              rootEmotions[key] = (emotionData as Record<string, any>)[`${key}_prob`];
-            }
-          });
-          
-          if (Object.keys(rootEmotions).length > 0) {
-            emotions = rootEmotions;
-          }
-        }
-        
-        // Try alternative structures if needed
-        if (!emotions || Object.keys(emotions).length === 0) {
-          if ((emotionData as Record<string, any>).emotion_scores) {
-            emotions = (emotionData as Record<string, any>).emotion_scores;
-          } else if ((emotionData as Record<string, any>).results && 
-                     (emotionData as Record<string, any>).results.emotion) {
-            emotions = (emotionData as Record<string, any>).results.emotion;
-          } else if (typeof emotionData === 'object') {
-            for (const key in emotionData) {
-              if (key.toLowerCase().includes('emotion') && 
-                  typeof (emotionData as Record<string, any>)[key] === 'object') {
-                emotions = (emotionData as Record<string, any>)[key];
-                break;
-              }
-            }
-          }
-        }
-        
-        if (emotions && Object.keys(emotions).length > 0) {
-          const entries = Object.entries(emotions).filter(([_, value]) => 
-            value !== undefined && value !== null && !isNaN(Number(value))
-          );
-          const nonNeutralEmotions = entries.filter(([key]) => 
-            !['neutral', 'calm'].includes(key.toLowerCase())
-          );
-          
-          const emotionsToConsider = nonNeutralEmotions.length > 0 ? nonNeutralEmotions : entries;
-          
-          if (emotionsToConsider.length > 0) {
-            const dominant = emotionsToConsider.sort(([, a], [, b]) => {
-              const valueA = typeof a === 'string' ? parseFloat(a) : Number(a);
-              const valueB = typeof b === 'string' ? parseFloat(b) : Number(b);
-              return valueB - valueA;
-            })[0];
-            
-            if (dominant) {
-              const name = dominant[0].charAt(0).toUpperCase() + dominant[0].slice(1);
-              const value = typeof dominant[1] === 'string' ? parseFloat(dominant[1]) : Number(dominant[1]);
-              const percentage = value > 1 ? Math.round(value) : Math.round(value * 100);
-              dominantEmotion = `${name} (${percentage}%)`;
-              
-              // Generate emotion analysis based on dominant emotion
-              const emotionName = dominant[0].toLowerCase();
-              switch(emotionName) {
-                case 'happy':
-                  emotionAnalysis = "Your voice conveys happiness and positive energy. This upbeat tone helps create an engaging and optimistic atmosphere, which can be effective for motivational content and building rapport with listeners.";
-                  break;
-                case 'sad':
-                  emotionAnalysis = "Your voice reflects a somber or melancholic tone. This emotional quality can create empathy and connection when discussing serious topics, though it may benefit from more variation for engaging longer conversations.";
-                  break;
-                case 'angry':
-                  emotionAnalysis = "Your voice expresses intensity and strong conviction. This passionate delivery can be powerful for persuasive content, though moderating the tone for different segments might create better listener engagement over time.";
-                  break;
-                case 'fear':
-                  emotionAnalysis = "Your voice conveys apprehension or concern. This cautious delivery style can be effective when discussing risks or warnings, though it may benefit from balancing with more confident tones in other segments.";
-                  break;
-                case 'surprise':
-                  emotionAnalysis = "Your voice expresses wonder and curiosity. This engaged tone creates interest and can effectively maintain listener attention, particularly useful when introducing new concepts or unexpected information.";
-                  break;
-                case 'disgust':
-                  emotionAnalysis = "Your voice conveys strong disapproval or aversion. This critical tone can be appropriate when discussing problematic issues, though balancing with constructive alternatives may create a more positive overall impression.";
-                  break;
-                case 'neutral':
-                case 'calm':
-                  emotionAnalysis = "Your speech tone is primarily neutral and measured. This balanced delivery is appropriate for informational content and creates a sense of credibility and objectivity.";
-                  break;
-                default:
-                  emotionAnalysis = `Your voice primarily expresses ${emotionName}, creating a distinctive emotional quality in your delivery. This emotional tone adds personality to your speech and helps create connection with listeners.`;
-              }
-            }
-          }
-        }
-      } catch (emotionErr) {
-        console.error('Error extracting dominant emotion:', emotionErr);
-      }
-      
-      // Create a copy of the analysis with the emotion data added
-      const analysisWithEmotion = {
-        ...analysis,
-        dominantEmotion: dominantEmotion,
-        emotionAnalysis: emotionAnalysis
-      } as AudioAnalysisResult & { 
-        dominantEmotion: string; 
-        emotionAnalysis: string;
-      };
-      
-      // Set selected recording, analysis and open dialog
-      setSelectedAnalysis(analysisWithEmotion);
-      setSelectedRecordingName(`${recording.file_name} - ${dominantEmotion}`);
-      setAnalysisDialogOpen(true);
-    } catch (err) {
-      console.error('Error viewing analysis:', err);
-      setError(`Error viewing analysis: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  };
-
   // Format percentage value
   const formatPercentage = (value: number): string => {
     return `${Math.round(value * 100)}%`;
+  };
+
+  // Save analysis data to the database
+  const saveAnalysisToDatabase = async (recording: DBRecording, analysisData: any) => {
+    try {
+      console.log('Saving analysis data to audio_analysis table...');
+      
+      // Add recording_id to the analysis data
+      const analysisDataForSaving = {
+        ...analysisData,
+        recording_id: recording.id
+      };
+      
+      // Save to audio_analysis table
+      const { data, error } = await saveViewAnalysis(analysisDataForSaving);
+      
+      if (error) {
+        console.error('Error saving to audio_analysis table:', error);
+        return false;
+      } else {
+        console.log('Successfully saved analysis to audio_analysis table:', data);
+        return true;
+      }
+    } catch (saveError) {
+      console.error('Exception saving to audio_analysis table:', saveError);
+      return false;
+    }
   };
 
   // Analyze recording manually with backend model
@@ -936,6 +825,9 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
               analysisWithEmotion.emotionAnalysis = "Your speech shows a balanced emotional quality that creates an engaging delivery pattern. The natural variation in tone helps maintain listener interest throughout your recording.";
             }
           }
+          
+          // Save complete analysis data to audio_analysis table
+          await saveAnalysisToDatabase(recording, analysisWithEmotion);
           
           // Update the recording in state with the new analysis
           setRecordings(prevRecordings => 
@@ -1184,17 +1076,6 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
                       <DownloadIcon fontSize="small" />
                     </IconButton>
                     
-                    <Tooltip title="View analysis">
-                      <IconButton 
-                        size="small" 
-                        onClick={() => viewAnalysis(recording)}
-                        color="info"
-                        sx={{ p: { xs: 0.5, sm: 1 } }}
-                      >
-                        <AssessmentIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    
                     <Tooltip title="Analyze with model">
                       <span>
                         <IconButton 
@@ -1388,7 +1269,7 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing }) => {
             <Typography variant="h6">Audio Analysis: {selectedRecordingName}</Typography>
           </Box>
           <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
-            Analysis data is stored in Supabase for retrieval across sessions
+            Analysis data is stored in Supabase audio_analysis table for retrieval across sessions
           </Typography>
         </DialogTitle>
         <DialogContent>
