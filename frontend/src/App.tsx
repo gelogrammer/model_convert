@@ -9,6 +9,7 @@ import Recordings from './components/Recordings';
 import { initializeWebSocket, closeWebSocket, setAudioProcessingEnabled } from './services/websocket';
 import { saveRecordingToDatabase } from './services/recordingsService';
 import './App.css';
+import { analyzeAudioWithModel } from './services/analysisService';
 
 // Create a theme
 const theme = createTheme({
@@ -230,6 +231,7 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isModelInitialized, setIsModelInitialized] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [emotionResult, setEmotionResult] = useState<EmotionResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -251,6 +253,9 @@ function App() {
   
   // Keep track of previous result to prevent infinite loops
   const prevEmotionResultRef = useRef<EmotionResult | null>(null);
+  
+  // Add state to track HuggingFace API availability
+  const [isHuggingFaceAvailable, setIsHuggingFaceAvailable] = useState(true);
   
   // Initialize WebSocket connection
   useEffect(() => {
@@ -678,6 +683,95 @@ function App() {
     setLatestRecordingId(null);
   };
 
+  // Add a function to check if the response indicates HuggingFace API unavailability
+  const checkHuggingFaceAvailability = (response: any) => {
+    // Check if the response has a special indicator that we're using fallback mode
+    if (response && response._meta && response._meta.using_fallback === true) {
+      setIsHuggingFaceAvailable(false);
+      
+      // Set a timer to try again after 2 minutes
+      setTimeout(() => {
+        setIsHuggingFaceAvailable(true);
+      }, 2 * 60 * 1000); // 2 minutes
+    }
+  };
+  
+  useEffect(() => {
+    // Check for stored API availability on start
+    const storedAvailability = localStorage.getItem('huggingFaceApiAvailable');
+    if (storedAvailability === 'false') {
+      setIsHuggingFaceAvailable(false);
+      
+      // Also check when it was stored
+      const storedTime = localStorage.getItem('huggingFaceApiUnavailableTime');
+      if (storedTime) {
+        const unavailableTime = parseInt(storedTime, 10);
+        const currentTime = Date.now();
+        
+        // If it's been more than 2 minutes, reset
+        if (currentTime - unavailableTime > 2 * 60 * 1000) {
+          setIsHuggingFaceAvailable(true);
+          localStorage.removeItem('huggingFaceApiAvailable');
+          localStorage.removeItem('huggingFaceApiUnavailableTime');
+        }
+      }
+    }
+  }, []);
+  
+  // Implement the processAudioData function to process audio and check for API availability
+  const processAudioData = async (audioBlob: Blob) => {
+    if (!audioBlob || !isCapturing) return;
+    
+    try {
+      // Process the audio with the model
+      const result = await analyzeAudioWithModel(audioBlob);
+      
+      // Check if the result indicates HuggingFace API unavailability
+      if (result && '_meta' in result && result._meta && result._meta.using_fallback === true) {
+        setIsHuggingFaceAvailable(false);
+        
+        // Store the API unavailability in localStorage with a timestamp
+        localStorage.setItem('huggingFaceApiAvailable', 'false');
+        localStorage.setItem('huggingFaceApiUnavailableTime', Date.now().toString());
+        
+        // Set a timer to try again after 2 minutes
+        setTimeout(() => {
+          setIsHuggingFaceAvailable(true);
+          localStorage.removeItem('huggingFaceApiAvailable');
+          localStorage.removeItem('huggingFaceApiUnavailableTime');
+        }, 2 * 60 * 1000); // 2 minutes
+      } else if (result && !('_meta' in result)) {
+        // If we get a successful result with no meta tag, the API is working
+        setIsHuggingFaceAvailable(true);
+        localStorage.removeItem('huggingFaceApiAvailable');
+        localStorage.removeItem('huggingFaceApiUnavailableTime');
+      }
+      
+      // Process the emotion result
+      if (result) {
+        // Format the result to match our EmotionResult type
+        const formattedResult: EmotionResult = {
+          emotion: result.emotion,
+          confidence: result.confidence,
+          probabilities: result.probabilities,
+          speech_rate: result.speechRate,
+          is_speech: true,
+          speech_characteristics: result.speechCharacteristics || undefined
+        };
+        
+        // Update the emotion result state
+        setEmotionResult(formattedResult);
+        
+        // If we have speech characteristics, update the last speech characteristics
+        if (formattedResult.speech_characteristics) {
+          setLastSpeechCharacteristics(formattedResult.speech_characteristics);
+        }
+      }
+    } catch (error) {
+      console.error("Error processing audio:", error);
+    }
+  };
+  
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -975,6 +1069,7 @@ function App() {
                       showLastDetectedMessage={!emotionResult?.speech_characteristics && !!lastSpeechCharacteristics}
                       showWaitingMessage={true}
                       useASRModel={true}
+                      isUsingFallback={!isHuggingFaceAvailable}
                     />
                   </Paper>
                 </Box>

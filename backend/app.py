@@ -160,8 +160,9 @@ def analyze_audio():
         
         if asr_service:
             try:
-                # Get speech characteristics from ASR model
-                speech_characteristics = asr_service.process_audio(features)
+                # Extract features specifically for ASR
+                asr_features = audio_processor.extract_features_for_asr(audio_data)
+                speech_characteristics = asr_service.process_audio(asr_features)
                 
                 # Use ASR model for more accurate speech rate analysis
                 # This will override the basic speech rate calculation
@@ -335,13 +336,21 @@ def proxy_huggingface():
                         "status": "error", 
                         "message": "Hugging Face model is currently loading or unavailable, try again later", 
                         "error": error_text,
-                        "code": 503
+                        "code": 503,
+                        "_meta": {
+                            "using_fallback": True,
+                            "fallback_reason": "HuggingFace service unavailable (503)"
+                        }
                     }), 503
                 
                 return jsonify({
                     "status": "error", 
                     "message": f"Hugging Face API error: {hf_response.status_code}", 
-                    "error": error_text
+                    "error": error_text,
+                    "_meta": {
+                        "using_fallback": True,
+                        "fallback_reason": f"HuggingFace API error: {hf_response.status_code}"
+                    }
                 }), hf_response.status_code
             
             # Process and return the response
@@ -358,7 +367,11 @@ def proxy_huggingface():
             return jsonify({
                 "status": "error",
                 "message": "Hugging Face API request timed out",
-                "error": "Request timed out after 30 seconds"
+                "error": "Request timed out after 30 seconds",
+                "_meta": {
+                    "using_fallback": True,
+                    "fallback_reason": "HuggingFace API timeout"
+                }
             }), 504
             
         except requests.exceptions.ConnectionError as ce:
@@ -366,7 +379,11 @@ def proxy_huggingface():
             return jsonify({
                 "status": "error",
                 "message": "Connection error to Hugging Face API",
-                "error": str(ce)
+                "error": str(ce),
+                "_meta": {
+                    "using_fallback": True,
+                    "fallback_reason": "HuggingFace API connection error"
+                }
             }), 502
             
     except Exception as e:
@@ -381,7 +398,14 @@ def proxy_huggingface():
         except:
             pass
             
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({
+            "status": "error", 
+            "message": str(e),
+            "_meta": {
+                "using_fallback": True,
+                "fallback_reason": "Internal server error"
+            }
+        }), 500
 
 # Socket.IO event handlers
 @socketio.on('connect')
@@ -441,7 +465,9 @@ def handle_audio_stream(data):
             speech_characteristics = {}
             if asr_service:
                 try:
-                    speech_characteristics = asr_service.process_audio(features)
+                    # Extract features specifically for ASR
+                    asr_features = audio_processor.extract_features_for_asr(audio_data)
+                    speech_characteristics = asr_service.process_audio(asr_features)
                 except Exception as e:
                     print(f"Error in ASR processing: {e}")
             

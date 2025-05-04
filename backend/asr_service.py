@@ -108,19 +108,34 @@ class ASRService:
         Returns:
             Dictionary of speech characteristics
         """
-        # Convert features to tensor
-        if isinstance(features, np.ndarray):
-            features_tensor = torch.tensor(features, dtype=torch.float32).to(self.device)
-        else:
-            features_tensor = features.to(self.device)
-        
-        # Ensure correct shape for model
-        if len(features_tensor.shape) == 1:
-            features_tensor = features_tensor.unsqueeze(0)
-        
-        # Get predictions
-        with torch.no_grad():
-            try:
+        try:
+            # Convert features to tensor
+            if isinstance(features, np.ndarray):
+                # Reshape features to match model's expected input dimension
+                # The original features have 180 dimensions, but the model expects 13
+                # Extract the first 13 features or use dimensionality reduction
+                if features.shape[0] == 180:
+                    # Option 1: Use the first 13 features
+                    features = features[:13]
+                    
+                    # Option 2: Alternative approach - reshape to 13 features by averaging
+                    # Reshape 180 features into 13 groups and average each group
+                    # feature_groups = np.array_split(features, 13)
+                    # features = np.array([np.mean(group) for group in feature_groups])
+                
+                features_tensor = torch.tensor(features, dtype=torch.float32).to(self.device)
+            else:
+                # If already a tensor, check and reshape if needed
+                if features.size(0) == 180:
+                    features = features[:13]
+                features_tensor = features.to(self.device)
+            
+            # Ensure correct shape for model
+            if len(features_tensor.shape) == 1:
+                features_tensor = features_tensor.unsqueeze(0)
+            
+            # Get predictions
+            with torch.no_grad():
                 outputs = self.model(features_tensor)
                 
                 # Extract different outputs
@@ -161,11 +176,11 @@ class ASRService:
                         "confidence": float(pronunciation_confidence)
                     }
                 }
-            except Exception as e:
-                print(f"Error during ASR processing: {e}")
-                # Fallback to default values if model processing fails
-                return {
-                    "fluency": {"category": "Medium Fluency", "confidence": 0.5},
-                    "tempo": {"category": "Medium Tempo", "confidence": 0.5},
-                    "pronunciation": {"category": "Clear Pronunciation", "confidence": 0.5}
-                } 
+        except Exception as e:
+            print(f"Error during ASR processing: {e}")
+            # Fallback to default values if model processing fails
+            return {
+                "fluency": {"category": "Medium Fluency", "confidence": 0.5},
+                "tempo": {"category": "Medium Tempo", "confidence": 0.5},
+                "pronunciation": {"category": "Clear Pronunciation", "confidence": 0.5}
+            } 

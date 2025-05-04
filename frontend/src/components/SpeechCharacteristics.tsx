@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { 
   Typography, Box, LinearProgress, Chip, CircularProgress, alpha, Tooltip, Paper,
-  Stack, useTheme, Fade, Divider
+  Stack, useTheme, Fade, Divider, Alert, Snackbar
 } from '@mui/material';
 import MicIcon from '@mui/icons-material/Mic';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import SpeedIcon from '@mui/icons-material/Speed';
 import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver';
 import GraphicEqIcon from '@mui/icons-material/GraphicEq';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
 
 // Animation timing constants
 const ANIMATION = {
@@ -30,6 +31,7 @@ interface SpeechCharacteristicsProps {
   showLastDetectedMessage?: boolean;
   showWaitingMessage?: boolean;
   useASRModel?: boolean; // New prop to toggle ASR model usage
+  isUsingFallback?: boolean; // New prop to indicate if using fallback mode
 }
 
 // Define ASR model-specific types
@@ -110,7 +112,8 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
   noPaper = false,
   showLastDetectedMessage = false,
   showWaitingMessage = false,
-  useASRModel = true // Enable ASR by default
+  useASRModel = true, // Enable ASR by default
+  isUsingFallback = false // Default to not using fallback
 }) => {
   // Get Material-UI theme
   const theme = useTheme();
@@ -126,6 +129,21 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
   const [asrMetrics, setAsrMetrics] = useState<ASRModelMetrics>(DEFAULT_ASR_METRICS);
   const [isProcessing, setIsProcessing] = useState(false);
   const [analysisCount, setAnalysisCount] = useState(0);
+  const [showFallbackMessage, setShowFallbackMessage] = useState(false);
+  
+  // Show fallback notice when API is unavailable
+  useEffect(() => {
+    setShowFallbackMessage(isUsingFallback);
+    
+    // Auto-hide message after 10 seconds
+    if (isUsingFallback) {
+      const timer = setTimeout(() => {
+        setShowFallbackMessage(false);
+      }, 10000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isUsingFallback]);
   
   // Simulate ASR model processing
   useEffect(() => {
@@ -255,6 +273,30 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       position: 'relative',
       overflow: 'hidden'
     }}>
+      {/* Fallback API notification */}
+      <Snackbar 
+        open={showFallbackMessage}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        onClose={() => setShowFallbackMessage(false)}
+      >
+        <Alert 
+          severity="info" 
+          variant="filled"
+          icon={<CloudOffIcon />}
+          onClose={() => setShowFallbackMessage(false)} 
+          sx={{ 
+            width: '100%',
+            backgroundColor: alpha(theme.palette.warning.main, 0.9),
+            color: '#fff',
+            '& .MuiAlert-icon': {
+              color: '#fff'
+            }
+          }}
+        >
+          Cloud API temporarily unavailable. Using local processing.
+        </Alert>
+      </Snackbar>
+
       {showLastDetectedMessage && (
         <Fade in={true}>
           <Typography variant="caption" sx={{ 
@@ -284,7 +326,7 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <GraphicEqIcon sx={{ 
                 fontSize: '1.1rem', 
-                color: theme => theme.palette.primary.main, 
+                color: theme => isUsingFallback ? theme.palette.warning.main : theme.palette.primary.main, 
                 opacity: isProcessing ? 1 : 0.8 
               }} />
               <Typography sx={{ 
@@ -295,21 +337,25 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
                 alignItems: 'center',
                 gap: 0.5
               }}>
-                ASR Model
-                <Tooltip title="Advanced Speech Recognition model analyzing your speech patterns in real-time">
+                {isUsingFallback ? "Local" : "ASR"} Model
+                <Tooltip title={isUsingFallback 
+                  ? "Using local analysis due to cloud service unavailability" 
+                  : "Advanced Speech Recognition model analyzing your speech patterns in real-time"}>
                   <InfoOutlinedIcon sx={{ fontSize: '0.8rem', opacity: 0.7 }} />
                 </Tooltip>
               </Typography>
               <Chip
-                label={isProcessing ? "Processing..." : "Active"}
+                label={isUsingFallback 
+                  ? "Local" 
+                  : isProcessing ? "Processing..." : "Active"}
                 size="small"
-                color={isProcessing ? "warning" : "success"}
+                color={isUsingFallback ? "warning" : isProcessing ? "warning" : "success"}
                 sx={{
                   height: 20,
                   fontSize: '0.7rem',
                   fontWeight: 500,
                   borderRadius: '10px',
-                  backgroundColor: isProcessing ? '#ff9800' : '#4caf50',
+                  backgroundColor: isUsingFallback ? alpha('#ff9800', 0.9) : isProcessing ? '#ff9800' : '#4caf50',
                 }}
               />
             </Box>
@@ -321,13 +367,13 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
                 <Box sx={{ 
                   width: 8, 
                   height: 8, 
-                  backgroundColor: '#4caf50', 
+                  backgroundColor: isUsingFallback ? '#ff9800' : '#4caf50', 
                   borderRadius: '50%',
                   animation: 'pulse 2s infinite',
                   '@keyframes pulse': {
-                    '0%': { boxShadow: '0 0 0 0 rgba(76, 175, 80, 0.7)' },
-                    '70%': { boxShadow: '0 0 0 5px rgba(76, 175, 80, 0)' },
-                    '100%': { boxShadow: '0 0 0 0 rgba(76, 175, 80, 0)' }
+                    '0%': { boxShadow: `0 0 0 0 ${isUsingFallback ? 'rgba(255, 152, 0, 0.7)' : 'rgba(76, 175, 80, 0.7)'}` },
+                    '70%': { boxShadow: `0 0 0 5px ${isUsingFallback ? 'rgba(255, 152, 0, 0)' : 'rgba(76, 175, 80, 0)'}` },
+                    '100%': { boxShadow: `0 0 0 0 ${isUsingFallback ? 'rgba(255, 152, 0, 0)' : 'rgba(76, 175, 80, 0)'}` }
                   }
                 }} />
               )}

@@ -110,12 +110,39 @@ class AudioProcessor:
             mfccs_mean, mfccs_std, chroma_mean, mel_mean
         ])
         
-        # Ensure we have exactly 180 features as expected by the model
+        # Ensure we have exactly 180 features as expected by the SER model
         if len(features) > 180:
             features = features[:180]  # Truncate if too many
         elif len(features) < 180:
             # Pad with zeros if too few
             features = np.pad(features, (0, 180 - len(features)), 'constant')
+        
+        return features
+    
+    def extract_features_for_asr(self, audio_data):
+        """
+        Extract features optimized for ASR model.
+        
+        Args:
+            audio_data: Audio data to extract features from
+            
+        Returns:
+            Features for ASR model (13 dimensions)
+        """
+        # Extract MFCCs for ASR - use 13 coefficients which is standard for ASR
+        mfccs = librosa.feature.mfcc(
+            y=audio_data,
+            sr=self.sample_rate,
+            n_mfcc=13,  # Standard for ASR is 13 MFCCs
+            n_fft=self.n_fft,
+            hop_length=self.hop_length
+        )
+        
+        # Get mean across time dimension to get one feature vector
+        features = np.mean(mfccs, axis=1)
+        
+        # Ensure we have exactly 13 features
+        assert len(features) == 13, f"Expected 13 features, got {len(features)}"
         
         return features
     
