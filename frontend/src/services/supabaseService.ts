@@ -691,6 +691,43 @@ export const saveAudioAnalysis = async (analysisData: AudioAnalysisData) => {
     
     if (error) {
       console.error('Error saving audio analysis:', error);
+      
+      // If the record already exists (due to the unique constraint), perform an update instead
+      if (error.code === '23505') {  // Unique violation code
+        console.log('Recording analysis already exists, updating instead...');
+        
+        const { data: updateData, error: updateError } = await supabase
+          .from('audio_analysis')
+          .update({
+            duration: analysisData.duration,
+            average_volume: analysisData.average_volume,
+            peak_volume: analysisData.peak_volume,
+            silence_duration: analysisData.silence_duration,
+            speech_rate: analysisData.speech_rate,
+            word_count: analysisData.word_count,
+            fluency: analysisData.fluency,
+            tempo: analysisData.tempo,
+            pronunciation: analysisData.pronunciation,
+            audio_clarity: analysisData.audio_clarity,
+            noise_level: analysisData.noise_level,
+            distortion: analysisData.distortion,
+            dominant_emotion: analysisData.dominant_emotion,
+            emotion_confidence: analysisData.emotion_confidence,
+            segments: analysisData.segments,
+            updated_at: new Date().toISOString()
+          })
+          .eq('recording_id', analysisData.recording_id)
+          .select()
+          .single();
+          
+        if (updateError) {
+          console.error('Error updating audio analysis:', updateError);
+          return { data: null, error: updateError };
+        }
+        
+        return { data: updateData, error: null };
+      }
+      
       return { data: null, error };
     }
     

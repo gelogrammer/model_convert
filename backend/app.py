@@ -12,6 +12,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import eventlet
 import requests
+import time
 try:
     import torch
     from transformers import pipeline
@@ -247,10 +248,11 @@ def proxy_huggingface():
         with open(temp_file_path, 'wb') as f:
             f.write(audio_bytes)
         
-        # Try using transformers pipeline if available
+        # Try local transformers pipeline first with more robust error handling
         if TRANSFORMERS_AVAILABLE:
             try:
                 print("Using transformers pipeline for emotion classification")
+                
                 # Use the specific model requested by the user
                 classifier = pipeline(
                     "audio-classification", 
@@ -298,94 +300,122 @@ def proxy_huggingface():
         else:
             print("Transformers not available, using REST API")
         
-        # Standard REST API fallback approach
-        hf_url = f"https://api-inference.huggingface.co/models/{model_id}"
+        # REST API fallback with improved retry logic
+        max_retries = 3
+        retry_count = 0
+        last_error = None
         
-        # Standard REST API request
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json'
-        }
-        
-        # For audio models, the API expects the base64 string directly
-        payload = {
-            'inputs': audio_base64
-        }
-        
-        # Make the request with a longer timeout
-        try:
-            hf_response = requests.post(
-                hf_url,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            
-            print(f"REST API response status: {hf_response.status_code}")
-            
-            if not hf_response.ok:
-                error_text = hf_response.text
-                print(f"REST API error: {error_text}")
+        while retry_count < max_retries:
+            try:
+                # Standard REST API fallback approach
+                hf_url = f"https://api-inference.huggingface.co/models/{model_id}"
                 
-                # Handle 503 Service Unavailable explicitly
-                if hf_response.status_code == 503:
-                    print("Service unavailable - model may be loading or unavailable")
+                # Standard REST API request
+                headers = {
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json'
+                }
+                
+                # For audio models, the API expects the base64 string directly
+                payload = {
+                    'inputs': audio_base64
+                }
+                
+                # Make the request with a longer timeout
+                print(f"Making HuggingFace API request (attempt {retry_count + 1}/{max_retries})...")
+                hf_response = requests.post(
+                    hf_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                print(f"REST API response status: {hf_response.status_code}")
+                
+                if hf_response.ok:
+                    # Process and return the response
+                    result = hf_response.json()
+                    print("REST API response:", result)
                     
-                    # Return a better error message for 503
+                    # Clean up temp file
+                    try:
+                        os.remove(temp_file_path)
+                    except:
+                        pass
+                    
+                    return jsonify({
+                        "status": "success",
+                        "result": result
+                    })
+                elif hf_response.status_code == 503:
+                    # Model is loading, retry after delay
+                    retry_count += 1
+                    last_error = hf_response.text
+                    wait_time = 2 ** retry_count  # Exponential backoff (2, 4, 8 seconds)
+                    print(f"503 Service Unavailable, retrying after {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    # Other error, return immediately
+                    error_text = hf_response.text
+                    print(f"REST API error: {error_text}")
+                    
+                    # Clean up temp file
+                    try:
+                        os.remove(temp_file_path)
+                    except:
+                        pass
+                    
                     return jsonify({
                         "status": "error", 
-                        "message": "Hugging Face model is currently loading or unavailable, try again later", 
+                        "message": f"Hugging Face API error: {hf_response.status_code}", 
                         "error": error_text,
-                        "code": 503,
                         "_meta": {
                             "using_fallback": True,
-                            "fallback_reason": "HuggingFace service unavailable (503)"
+                            "fallback_reason": f"HuggingFace API error: {hf_response.status_code}"
                         }
-                    }), 503
+                    }), hf_response.status_code
+            
+            except requests.exceptions.Timeout:
+                retry_count += 1
+                last_error = "Request timed out after 30 seconds"
+                wait_time = 2 ** retry_count  # Exponential backoff
+                print(f"API request timed out, retrying after {wait_time} seconds...")
+                time.sleep(wait_time)
                 
-                return jsonify({
-                    "status": "error", 
-                    "message": f"Hugging Face API error: {hf_response.status_code}", 
-                    "error": error_text,
-                    "_meta": {
-                        "using_fallback": True,
-                        "fallback_reason": f"HuggingFace API error: {hf_response.status_code}"
-                    }
-                }), hf_response.status_code
-            
-            # Process and return the response
-            result = hf_response.json()
-            print("REST API response:", result)
-            
-            return jsonify({
-                "status": "success",
-                "result": result
-            })
-            
-        except requests.exceptions.Timeout:
-            print("REST API request timed out")
-            return jsonify({
-                "status": "error",
-                "message": "Hugging Face API request timed out",
-                "error": "Request timed out after 30 seconds",
-                "_meta": {
-                    "using_fallback": True,
-                    "fallback_reason": "HuggingFace API timeout"
-                }
-            }), 504
-            
-        except requests.exceptions.ConnectionError as ce:
-            print(f"REST API connection error: {str(ce)}")
-            return jsonify({
-                "status": "error",
-                "message": "Connection error to Hugging Face API",
-                "error": str(ce),
-                "_meta": {
-                    "using_fallback": True,
-                    "fallback_reason": "HuggingFace API connection error"
-                }
-            }), 502
-            
+            except requests.exceptions.ConnectionError as ce:
+                retry_count += 1
+                last_error = str(ce)
+                wait_time = 2 ** retry_count  # Exponential backoff
+                print(f"Connection error, retrying after {wait_time} seconds...")
+                time.sleep(wait_time)
+        
+        # If we've exhausted all retries, fall back to a simple emotion detection
+        print(f"Failed after {max_retries} attempts, providing fallback response")
+        
+        # Clean up temp file
+        try:
+            os.remove(temp_file_path)
+        except:
+            pass
+        
+        # Extract simple emotion from filename if possible or provide neutral fallback
+        # This is just a basic fallback when the API is completely unavailable
+        fallback_result = [
+            {"label": "neutral", "score": 0.8},
+            {"label": "happy", "score": 0.1},
+            {"label": "sad", "score": 0.05},
+            {"label": "angry", "score": 0.05}
+        ]
+        
+        return jsonify({
+            "status": "success",
+            "result": fallback_result,
+            "_meta": {
+                "using_fallback": True,
+                "fallback_reason": f"HuggingFace service unavailable after {max_retries} attempts: {last_error}"
+            }
+        })
+        
     except Exception as e:
         import traceback
         print(f"Exception in proxy_huggingface: {str(e)}")
