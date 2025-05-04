@@ -90,15 +90,39 @@ const MetricIndicator = memo<{
   value: number;
   metricName: 'fluency' | 'tempo' | 'pronunciation';
   segments: {label: string; color: string}[];
-}>(({ value, metricName, segments }) => {
+  category?: string; // Add actual category from characteristics
+}>(({ value, metricName, segments, category }) => {
   // Memoize the position value to reduce unnecessary calculations
   const roundedValue = useMemo(() => {
     // Round to nearest 0.5% to reduce jitter
     return Math.round(value * 2) / 2;
   }, [value]);
   
-  // Determine which segment the value falls into
-  const getActiveSegment = () => {
+  // Determine which segment the value falls into based on category or value
+  const getActiveSegment = useCallback(() => {
+    // If we have the actual category from the model, use that
+    if (category) {
+      const lowerCategory = category.toLowerCase();
+      
+      if (metricName === 'fluency') {
+        if (lowerCategory.includes('high')) return 2;
+        if (lowerCategory.includes('medium')) return 1;
+        return 0; // low
+      }
+      
+      if (metricName === 'tempo') {
+        if (lowerCategory.includes('fast')) return 2;
+        if (lowerCategory.includes('medium')) return 1;
+        return 0; // slow
+      }
+      
+      if (metricName === 'pronunciation') {
+        if (lowerCategory.includes('clear')) return 1;
+        return 0; // unclear
+      }
+    }
+    
+    // Fallback to value-based determination if category is not provided
     // Special case for pronunciation which only has 2 segments
     if (metricName === 'pronunciation') {
       return roundedValue < 50 ? 0 : 1;
@@ -108,7 +132,7 @@ const MetricIndicator = memo<{
     if (roundedValue < 33) return 0;
     if (roundedValue < 67) return 1;
     return 2;
-  };
+  }, [metricName, roundedValue, category]);
   
   const activeIndex = getActiveSegment();
   
@@ -747,18 +771,21 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
           metricName="fluency"
           value={metricValues.fluency}
           segments={fluencySegments}
+          category={characteristics?.fluency?.category}
         />
         
         <MetricIndicator 
           metricName="tempo"
           value={metricValues.tempo}
           segments={tempoSegments}
+          category={characteristics?.tempo?.category}
         />
         
         <MetricIndicator 
           metricName="pronunciation"
           value={metricValues.pronunciation}
           segments={pronunciationSegments}
+          category={characteristics?.pronunciation?.category}
         />
       </Box>
       
