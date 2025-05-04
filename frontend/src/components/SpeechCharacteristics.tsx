@@ -10,7 +10,7 @@ import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 
 // Animation timing constants
 const ANIMATION = {
-  transition: '0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+  transition: '0.15s cubic-bezier(0.4, 0, 0.2, 1)' // Faster transition for more responsive UI
 };
 
 // Add constants for fixed dimensions to prevent layout shifts
@@ -24,10 +24,28 @@ const LAYOUT = {
 
 // Add a constant for smoothing configuration to make it more responsive
 const SMOOTHING = {
-  // Lower value = faster response to new data
-  factor: 0.5,
+  // Lower value = faster response to new data (reduced from 0.5 to 0.3)
+  factor: 0.3,
   // Minimum change threshold to update UI (prevents tiny jitters)
-  threshold: 0.005
+  threshold: 0.005,
+  // Minimum refresh interval (in ms)
+  minUpdateInterval: 100
+};
+
+// Add speech activity detection parameters (from voice_test_gui.py)
+const SPEECH_DETECTION = {
+  energyThreshold: 0.01, // Energy threshold for speech detection
+  minSpeechDuration: 0.5, // Minimum duration of speech (seconds) to trigger analysis
+  analysisDelay: 200, // Milliseconds to wait before starting analysis after detecting speech
+  forceUpdateInterval: 5000 // Force update every 5 seconds even without speech
+};
+
+// Add constant for voice inactivity detection
+const VOICE_DETECTION = {
+  // Time in ms after which we show the waiting indicator if no speech detected
+  inactivityThreshold: 3000,
+  // Minimum confidence needed to consider audio as speech
+  minConfidenceThreshold: 0.03
 };
 
 interface SpeechCharacteristicsProps {
@@ -94,13 +112,15 @@ const MetricIndicator = memo<{
 }>(({ value, metricName, segments, category }) => {
   // Memoize the position value to reduce unnecessary calculations
   const roundedValue = useMemo(() => {
+    // Ensure value is within bounds
+    const boundedValue = Math.max(0, Math.min(100, value));
     // Round to nearest 0.5% to reduce jitter
-    return Math.round(value * 2) / 2;
+    return Math.round(boundedValue * 2) / 2;
   }, [value]);
   
   // Determine which segment the value falls into based on category or value
   const getActiveSegment = useCallback(() => {
-    // If we have the actual category from the model, use that
+    // If we have the actual category from the model, use that with higher priority
     if (category) {
       const lowerCategory = category.toLowerCase();
       
@@ -167,7 +187,7 @@ const MetricIndicator = memo<{
           textAlign: 'right',
           whiteSpace: 'nowrap'
         }}>
-          {segments[activeIndex].label}
+          {segments[activeIndex].label} ({Math.round(roundedValue)}%)
         </Typography>
       </Box>
       
@@ -353,144 +373,208 @@ const createAsrWorker = () => {
     timestamp: number;
     previousMetrics?: ASRModelMetrics;
     analysisCount: number;
+    isSpeaking?: boolean;
   };
   
   type MessageCallback = (data: { data: { type: string; metrics?: ASRModelMetrics } }) => void;
   
   const callbacks: { [key: string]: MessageCallback } = {};
   
+  // Enhanced calculation helpers
+  const calculateMetrics = (
+    characteristics: NonNullable<SpeechCharacteristicsProps['characteristics']>,
+    timestamp: number, 
+    previousMetrics?: ASRModelMetrics,
+    analysisCount: number = 0,
+    isSpeaking: boolean = false
+  ): ASRModelMetrics => {
+    // Extract characteristics with proper validation
+    const fluencyConfidence = Math.max(0, Math.min(1, characteristics.fluency.confidence));
+    const tempoConfidence = Math.max(0, Math.min(1, characteristics.tempo.confidence));
+    const pronunciationConfidence = Math.max(0, Math.min(1, characteristics.pronunciation.confidence));
+    
+    // Convert category strings to normalized values
+    const getCategoryValue = (category: string, defaultValue: number): number => {
+      const lower = category.toLowerCase();
+      
+      // Fluency categories
+      if (lower.includes('high fluency')) return 0.9;
+      if (lower.includes('high')) return 0.85;
+      if (lower.includes('medium fluency')) return 0.65;
+      if (lower.includes('medium')) return 0.6;
+      if (lower.includes('low fluency')) return 0.3;
+      if (lower.includes('low')) return 0.25;
+      
+      // Tempo categories
+      if (lower.includes('fast tempo')) return 0.85;
+      if (lower.includes('fast')) return 0.8;
+      if (lower.includes('medium tempo')) return 0.7;
+      if (lower.includes('slow tempo')) return 0.4;
+      if (lower.includes('slow')) return 0.35;
+      
+      // Pronunciation categories
+      if (lower.includes('clear pronunciation')) return 0.9;
+      if (lower.includes('clear')) return 0.85;
+      if (lower.includes('unclear pronunciation')) return 0.4;
+      if (lower.includes('unclear')) return 0.35;
+      
+      return defaultValue;
+    };
+    
+    // Get category values with confidences as weights
+    const fluencyValue = getCategoryValue(characteristics.fluency.category, 0.5) * (0.5 + fluencyConfidence * 0.5);
+    const tempoValue = getCategoryValue(characteristics.tempo.category, 0.5) * (0.5 + tempoConfidence * 0.5);
+    const pronunciationValue = getCategoryValue(characteristics.pronunciation.category, 0.5) * (0.5 + pronunciationConfidence * 0.5);
+    
+    // Create class probabilities based on characteristics and category values
+    const classProbabilities: { [key: string]: number } = {};
+    
+    // More accurate fluency mapping
+    const fluencyBase = fluencyValue;
+    const highFluencyProb = Math.pow(fluencyBase, 1.5) * 0.9;
+    const lowFluencyProb = Math.pow(1 - fluencyBase, 1.5) * 0.9;
+    const mediumFluencyProb = 1 - (highFluencyProb + lowFluencyProb);
+    
+    classProbabilities['high_fluency'] = highFluencyProb;
+    classProbabilities['medium_fluency'] = mediumFluencyProb;
+    classProbabilities['low_fluency'] = lowFluencyProb;
+    
+    // More accurate tempo mapping
+    const tempoBase = tempoValue;
+    const fastTempoProb = characteristics.tempo.category.toLowerCase().includes('fast') ? 
+                         0.6 + (0.3 * tempoConfidence) : 
+                         Math.pow(tempoBase, 1.2) * 0.7;
+    
+    const slowTempoProb = characteristics.tempo.category.toLowerCase().includes('slow') ? 
+                         0.6 + (0.3 * tempoConfidence) : 
+                         Math.pow(1 - tempoBase, 1.2) * 0.7;
+    
+    const mediumTempoProb = 1 - (fastTempoProb + slowTempoProb);
+    
+    classProbabilities['fast_tempo'] = fastTempoProb;
+    classProbabilities['medium_tempo'] = mediumTempoProb;
+    classProbabilities['slow_tempo'] = slowTempoProb;
+    
+    // More accurate pronunciation mapping
+    const pronunciationBase = pronunciationValue;
+    classProbabilities['clear_pronunciation'] = Math.min(0.95, pronunciationBase * 1.15);
+    classProbabilities['unclear_pronunciation'] = Math.min(0.95, (1 - pronunciationBase) * 1.15);
+    
+    // Normalize all probabilities to sum to 1.0 within each category
+    const normalizeGroup = (group: string[]) => {
+      const sum = group.reduce((acc, cls) => acc + (classProbabilities[cls] || 0), 0);
+      if (sum > 0 && sum !== 1) {
+        group.forEach(cls => {
+          classProbabilities[cls] = (classProbabilities[cls] || 0) / sum;
+        });
+      }
+    };
+    
+    normalizeGroup(['high_fluency', 'medium_fluency', 'low_fluency']);
+    normalizeGroup(['fast_tempo', 'medium_tempo', 'slow_tempo']);
+    normalizeGroup(['clear_pronunciation', 'unclear_pronunciation']);
+    
+    // Calculate scores with more accurate weighting
+    const fluencyScore = Math.min(1, (
+      (classProbabilities['high_fluency'] || 0) * 0.95 +
+      (classProbabilities['medium_fluency'] || 0) * 0.7 +
+      (classProbabilities['low_fluency'] || 0) * 0.4
+    ));
+    
+    const tempoScore = Math.min(1, (
+      (classProbabilities['fast_tempo'] || 0) * 0.9 +
+      (classProbabilities['medium_tempo'] || 0) * 0.8 +
+      (classProbabilities['slow_tempo'] || 0) * 0.5
+    ));
+    
+    const pronunciationScore = Math.min(1, (
+      (classProbabilities['clear_pronunciation'] || 0) * 0.9 +
+      (classProbabilities['unclear_pronunciation'] || 0) * 0.4
+    ));
+    
+    // Calculate overall score with weightings that match the Python implementation
+    const overallScore = Math.min(1, (
+      fluencyScore * 0.35 + 
+      tempoScore * 0.35 + 
+      pronunciationScore * 0.3
+    ));
+    
+    // Calculate speech metrics more accurately
+    const baseWordsPerMinute = 
+      (classProbabilities['fast_tempo'] || 0) * 160 + 
+      (classProbabilities['medium_tempo'] || 0) * 120 + 
+      (classProbabilities['slow_tempo'] || 0) * 80;
+    
+    const calculatedSilenceRatio = isSpeaking ? 
+      Math.max(0.05, 0.3 - (fluencyScore * 0.25)) : 
+      Math.min(0.8, 0.4 + ((1 - fluencyScore) * 0.4));
+    
+    // Calculate word count
+    const speechDurationSec = previousMetrics ? 
+      (timestamp - previousMetrics.lastUpdated) / 1000 : 
+      1.0;
+      
+    const normalizedDuration = Math.max(0.2, speechDurationSec);
+    const estimatedWordCount = isSpeaking ? 
+      Math.floor((baseWordsPerMinute / 60) * normalizedDuration) : 
+      Math.floor((baseWordsPerMinute / 60) * normalizedDuration * 0.2);
+    
+    // Apply smoothing with improved responsiveness
+    const smoothingFactor = SMOOTHING.factor;
+    const smooth = (current: number, previous: number, weight: number = 1.0) => {
+      if (analysisCount === 0 || isNaN(previous) || isNaN(current)) {
+        return isNaN(current) ? 0 : current;
+      }
+      
+      // Skip smoothing for small changes to improve perceived responsiveness
+      const diff = Math.abs(current - previous);
+      if (diff < SMOOTHING.threshold) {
+        return previous;
+      }
+      
+      // Adjust smoothing factor based on speaking state and weight
+      const adjustedFactor = isSpeaking ? 
+        smoothingFactor * 0.8 * weight : // More responsive when speaking
+        smoothingFactor * 1.2; // Less responsive when silent
+        
+      const smoothedValue = previous * adjustedFactor + current * (1 - adjustedFactor);
+      return isNaN(smoothedValue) ? current : smoothedValue;
+    };
+    
+    const prevMetrics = previousMetrics || DEFAULT_ASR_METRICS;
+    
+    // Create metrics with improved accuracy
+    return {
+      fluencyScore: smooth(fluencyScore, prevMetrics.fluencyScore, 1.2),
+      tempoScore: smooth(tempoScore, prevMetrics.tempoScore, 1.1),
+      pronunciationScore: smooth(pronunciationScore, prevMetrics.pronunciationScore, 1.0),
+      overallScore: smooth(overallScore, prevMetrics.overallScore, 1.2),
+      wordCount: analysisCount === 0 ? 
+        estimatedWordCount : 
+        prevMetrics.wordCount + estimatedWordCount,
+      wordsPerMinute: smooth(baseWordsPerMinute, prevMetrics.wordsPerMinute, 0.9),
+      silenceRatio: smooth(Math.max(0, Math.min(0.8, calculatedSilenceRatio)), prevMetrics.silenceRatio, 0.8),
+      processingTime: 25,
+      confidence: Math.min(0.98, 0.7 + (analysisCount * 0.03)),
+      lastUpdated: timestamp,
+      classProbabilities: classProbabilities
+    };
+  };
+  
   const mockWorker = {
     postMessage: (message: { type: string; data: WorkerMessageData }) => {
       setTimeout(() => {
         if (message.type === 'process_speech') {
-          const { characteristics, timestamp, previousMetrics, analysisCount } = message.data;
+          const { characteristics, timestamp, previousMetrics, analysisCount, isSpeaking = false } = message.data;
           
-          // Create realistic model probabilities based on characteristics
-          const classProbabilities: { [key: string]: number } = {};
-          
-          // Map fluency characteristics to class probabilities
-          const fluencyBase = characteristics.fluency.confidence;
-          
-          if (fluencyBase > 0.7) {
-            classProbabilities['high_fluency'] = 0.6 + (Math.random() * 0.2);
-            classProbabilities['medium_fluency'] = 0.3 - (Math.random() * 0.15);
-            classProbabilities['low_fluency'] = 0.1 - (Math.random() * 0.05);
-          } else if (fluencyBase > 0.4) {
-            classProbabilities['high_fluency'] = 0.3 - (Math.random() * 0.1);
-            classProbabilities['medium_fluency'] = 0.5 + (Math.random() * 0.2);
-            classProbabilities['low_fluency'] = 0.2 - (Math.random() * 0.1);
-          } else {
-            classProbabilities['high_fluency'] = 0.1 - (Math.random() * 0.05);
-            classProbabilities['medium_fluency'] = 0.3 - (Math.random() * 0.1);
-            classProbabilities['low_fluency'] = 0.6 + (Math.random() * 0.2);
-          }
-          
-          // Map tempo characteristics to class probabilities
-          if (characteristics.tempo.category.toLowerCase().includes('fast')) {
-            classProbabilities['fast_tempo'] = 0.7 + (Math.random() * 0.2);
-            classProbabilities['medium_tempo'] = 0.2 + (Math.random() * 0.1);
-            classProbabilities['slow_tempo'] = 0.1 - (Math.random() * 0.05);
-          } else if (characteristics.tempo.category.toLowerCase().includes('medium')) {
-            classProbabilities['fast_tempo'] = 0.2 + (Math.random() * 0.1);
-            classProbabilities['medium_tempo'] = 0.6 + (Math.random() * 0.2);
-            classProbabilities['slow_tempo'] = 0.2 - (Math.random() * 0.1);
-          } else {
-            classProbabilities['fast_tempo'] = 0.1 - (Math.random() * 0.05);
-            classProbabilities['medium_tempo'] = 0.3 - (Math.random() * 0.1);
-            classProbabilities['slow_tempo'] = 0.6 + (Math.random() * 0.2);
-          }
-          
-          // Map pronunciation characteristics to class probabilities
-          const pronunciationBase = characteristics.pronunciation.confidence;
-          
-          if (pronunciationBase > 0.6) {
-            classProbabilities['clear_pronunciation'] = 0.7 + (Math.random() * 0.2);
-            classProbabilities['unclear_pronunciation'] = 0.3 - (Math.random() * 0.2);
-          } else {
-            classProbabilities['clear_pronunciation'] = 0.3 - (Math.random() * 0.1);
-            classProbabilities['unclear_pronunciation'] = 0.7 + (Math.random() * 0.1);
-          }
-          
-          // Normalize probabilities
-          const normalizeGroup = (group: string[]) => {
-            const sum = group.reduce((acc, cls) => acc + classProbabilities[cls], 0);
-            if (sum > 0) {
-              group.forEach(cls => {
-                classProbabilities[cls] = classProbabilities[cls] / sum;
-              });
-            }
-          };
-          
-          normalizeGroup(['high_fluency', 'medium_fluency', 'low_fluency']);
-          normalizeGroup(['fast_tempo', 'medium_tempo', 'slow_tempo']);
-          normalizeGroup(['clear_pronunciation', 'unclear_pronunciation']);
-          
-          // Calculate scores
-          const fluencyScore = (
-            (classProbabilities['high_fluency'] || 0) * 95 +
-            (classProbabilities['medium_fluency'] || 0) * 75 +
-            (classProbabilities['low_fluency'] || 0) * 50
-          ) / 100;
-          
-          const tempoScore = (
-            (classProbabilities['fast_tempo'] || 0) * 95 +
-            (classProbabilities['medium_tempo'] || 0) * 75 +
-            (classProbabilities['slow_tempo'] || 0) * 50
-          ) / 100;
-          
-          const pronunciationScore = (
-            (classProbabilities['clear_pronunciation'] || 0) * 90 +
-            (classProbabilities['unclear_pronunciation'] || 0) * 50
-          ) / 100;
-          
-          const overallScore = (fluencyScore + tempoScore + pronunciationScore) / 3;
-          
-          // Calculate speech metrics
-          const baseWordsPerMinute = 
-            (classProbabilities['fast_tempo'] || 0) * 160 + 
-            (classProbabilities['medium_tempo'] || 0) * 130 + 
-            (classProbabilities['slow_tempo'] || 0) * 100;
-          
-          const calculatedSilenceRatio = 0.3 - (fluencyScore * 0.25);
-          
-          // Calculate word count
-          const speechDurationSec = (timestamp - (previousMetrics?.lastUpdated || timestamp)) / 1000;
-          const normalizedDuration = Math.max(0.5, speechDurationSec);
-          const estimatedWordCount = Math.floor((baseWordsPerMinute / 60) * normalizedDuration);
-          
-          // Apply smoothing with improved responsiveness
-          const smoothingFactor = SMOOTHING.factor; // Faster reactions to changes
-          const smooth = (current: number, previous: number) => {
-            if (analysisCount === 0 || isNaN(previous) || isNaN(current)) {
-              return isNaN(current) ? 0 : current;
-            }
-            
-            // Skip smoothing for small changes to improve perceived responsiveness
-            const diff = Math.abs(current - previous);
-            if (diff < SMOOTHING.threshold) {
-              return previous;
-            }
-            
-            const smoothedValue = previous * smoothingFactor + current * (1 - smoothingFactor);
-            return isNaN(smoothedValue) ? current : smoothedValue;
-          };
-          
-          const prevMetrics = previousMetrics || DEFAULT_ASR_METRICS;
-          
-          // Create metrics
-          const enhancedMetrics: ASRModelMetrics = {
-            fluencyScore: smooth(fluencyScore, prevMetrics.fluencyScore),
-            tempoScore: smooth(tempoScore, prevMetrics.tempoScore),
-            pronunciationScore: smooth(pronunciationScore, prevMetrics.pronunciationScore),
-            overallScore: smooth(overallScore, prevMetrics.overallScore),
-            wordCount: analysisCount === 0 ? estimatedWordCount : prevMetrics.wordCount + estimatedWordCount,
-            wordsPerMinute: smooth(baseWordsPerMinute, prevMetrics.wordsPerMinute),
-            silenceRatio: smooth(Math.max(0, Math.min(0.4, calculatedSilenceRatio)), prevMetrics.silenceRatio),
-            processingTime: 25,
-            confidence: Math.min(0.95, 0.6 + (analysisCount * 0.05)),
-            lastUpdated: timestamp,
-            classProbabilities: classProbabilities
-          };
+          // Calculate metrics with improved accuracy
+          const enhancedMetrics = calculateMetrics(
+            characteristics, 
+            timestamp, 
+            previousMetrics, 
+            analysisCount,
+            isSpeaking
+          );
           
           // Return result
           if (callbacks['message']) {
@@ -515,6 +599,141 @@ const createAsrWorker = () => {
   return mockWorker as unknown as Worker;
 };
 
+// Add a throttle function to optimize real-time updates
+const useThrottle = <T,>(value: T, limit: number): T => {
+  const [throttledValue, setThrottledValue] = useState<T>(value);
+  const lastRun = useRef<number>(Date.now());
+  
+  useEffect(() => {
+    const now = Date.now();
+    if (now - lastRun.current >= limit) {
+      lastRun.current = now;
+      setThrottledValue(value);
+    } else {
+      const timerId = setTimeout(() => {
+        lastRun.current = now;
+        setThrottledValue(value);
+      }, limit);
+      
+      return () => clearTimeout(timerId);
+    }
+  }, [value, limit]);
+  
+  return throttledValue;
+};
+
+// Create a speech activity detector (inspired by voice_test_gui.py)
+const useSpeechActivityDetector = (
+  characteristics: SpeechCharacteristicsProps['characteristics'],
+  isCapturing: boolean
+) => {
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [shouldAnalyze, setShouldAnalyze] = useState(false);
+  const [waitingForVoice, setWaitingForVoice] = useState(false);
+  const speechStartTime = useRef<number>(0);
+  const lastAnalysisTime = useRef<number>(Date.now());
+  const lastActivityTime = useRef<number>(Date.now());
+  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Reset the inactivity timer when component unmounts
+  useEffect(() => {
+    return () => {
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+    };
+  }, []);
+  
+  useEffect(() => {
+    if (!isCapturing || !characteristics) {
+      // Reset waiting state when not capturing
+      if (waitingForVoice) {
+        setWaitingForVoice(false);
+      }
+      return;
+    }
+    
+    // Calculate average energy from characteristics
+    const energy = (
+      characteristics.fluency.confidence + 
+      characteristics.tempo.confidence + 
+      characteristics.pronunciation.confidence
+    ) / 3;
+    
+    // Check if energy exceeds threshold
+    if (energy > SPEECH_DETECTION.energyThreshold) {
+      // Speech detected
+      if (!isSpeaking) {
+        // Start of speech
+        speechStartTime.current = Date.now();
+        setIsSpeaking(true);
+      }
+      
+      // Update last activity time
+      lastActivityTime.current = Date.now();
+      
+      // Clear any waiting state
+      if (waitingForVoice) {
+        setWaitingForVoice(false);
+      }
+      
+      // Clear any existing inactivity timer
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+      
+      // Check if speech duration is long enough and if we haven't analyzed recently
+      const speechDuration = (Date.now() - speechStartTime.current) / 1000;
+      const timeSinceLastAnalysis = Date.now() - lastAnalysisTime.current;
+      
+      if (speechDuration >= SPEECH_DETECTION.minSpeechDuration && 
+          timeSinceLastAnalysis >= SPEECH_DETECTION.analysisDelay) {
+        setShouldAnalyze(true);
+        lastAnalysisTime.current = Date.now();
+      }
+      
+      // Set a new inactivity timer
+      inactivityTimerRef.current = setTimeout(() => {
+        if (Date.now() - lastActivityTime.current >= VOICE_DETECTION.inactivityThreshold) {
+          setWaitingForVoice(true);
+        }
+      }, VOICE_DETECTION.inactivityThreshold);
+      
+    } else {
+      // No speech detected - start inactivity detection
+      if (isSpeaking) {
+        setIsSpeaking(false);
+      }
+      
+      // Set waiting state after inactivity threshold
+      if (!waitingForVoice && Date.now() - lastActivityTime.current >= VOICE_DETECTION.inactivityThreshold) {
+        setWaitingForVoice(true);
+      } else if (!inactivityTimerRef.current) {
+        // If no timer is set, set one to check for inactivity
+        inactivityTimerRef.current = setTimeout(() => {
+          if (Date.now() - lastActivityTime.current >= VOICE_DETECTION.inactivityThreshold) {
+            setWaitingForVoice(true);
+          }
+        }, VOICE_DETECTION.inactivityThreshold);
+      }
+      
+      // Force analysis if it's been too long since the last update
+      const timeSinceLastAnalysis = Date.now() - lastAnalysisTime.current;
+      if (timeSinceLastAnalysis >= SPEECH_DETECTION.forceUpdateInterval) {
+        setShouldAnalyze(true);
+        lastAnalysisTime.current = Date.now();
+      }
+    }
+    
+    return () => {
+      // Reset analysis flag after each update
+      setShouldAnalyze(false);
+    };
+  }, [characteristics, isCapturing, isSpeaking, waitingForVoice]);
+  
+  return { isSpeaking, shouldAnalyze, waitingForVoice };
+};
+
 const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({ 
   characteristics, 
   isCapturing,
@@ -536,6 +755,7 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
   const [showModelDetails, setShowModelDetails] = useState(false);
   
   const workerRef = useRef<Worker | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   
   const [performanceMetrics, setPerformanceMetrics] = useState({
     renderTime: 0,
@@ -543,9 +763,23 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
     lastRenderTimestamp: 0
   });
   
+  const [lastDetectedSpeech, setLastDetectedSpeech] = useState<number | null>(null);
+  
+  const { isSpeaking, shouldAnalyze, waitingForVoice } = useSpeechActivityDetector(characteristics, isCapturing);
+  
+  // Throttle state updates to reduce rendering
+  const throttledMetrics = useThrottle(asrMetrics, SMOOTHING.minUpdateInterval);
+  
   const toggleModelDetails = () => {
     setShowModelDetails(prev => !prev);
   };
+  
+  // Save the timestamp when speech was last detected
+  useEffect(() => {
+    if (isSpeaking) {
+      setLastDetectedSpeech(Date.now());
+    }
+  }, [isSpeaking]);
   
   // Initialize worker
   useEffect(() => {
@@ -554,7 +788,24 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       
       workerRef.current.addEventListener('message', (event) => {
         if (event.data.type === 'asr_result') {
-          setAsrMetrics(event.data.metrics);
+          setAsrMetrics(prev => {
+            // Apply custom smoothing logic to reduce jitter
+            const newMetrics = event.data.metrics;
+            
+            // Only update if changes exceed threshold
+            const fluencyDiff = Math.abs(prev.fluencyScore - newMetrics.fluencyScore);
+            const tempoDiff = Math.abs(prev.tempoScore - newMetrics.tempoScore);
+            const pronunciationDiff = Math.abs(prev.pronunciationScore - newMetrics.pronunciationScore);
+            
+            if (fluencyDiff < SMOOTHING.threshold && 
+                tempoDiff < SMOOTHING.threshold && 
+                pronunciationDiff < SMOOTHING.threshold) {
+              return prev;
+            }
+            
+            return newMetrics;
+          });
+          
           setIsProcessing(false);
           setAnalysisCount(prev => prev + 1);
         }
@@ -565,32 +816,35 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
           workerRef.current.terminate();
           workerRef.current = null;
         }
+        
+        // Cancel any pending animation frames
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
       };
     }
   }, [useASRModel]);
   
-  // Process speech with worker - optimize update frequency
+  // Process speech with worker only when shouldAnalyze is true
   useEffect(() => {
-    if (characteristics && isCapturing && useASRModel && workerRef.current) {
+    if (characteristics && isCapturing && useASRModel && workerRef.current && shouldAnalyze) {
       setIsProcessing(true);
       
       // Use a debounce mechanism to prevent too frequent updates
       const currentTime = Date.now();
-      const minUpdateInterval = 100; // milliseconds
       
-      if (!asrMetrics.lastUpdated || (currentTime - asrMetrics.lastUpdated > minUpdateInterval)) {
-        workerRef.current.postMessage({
-          type: 'process_speech',
-          data: {
-            characteristics,
-            timestamp: currentTime,
-            previousMetrics: asrMetrics,
-            analysisCount
-          }
-        });
-      }
+      workerRef.current.postMessage({
+        type: 'process_speech',
+        data: {
+          characteristics,
+          timestamp: currentTime,
+          previousMetrics: asrMetrics,
+          analysisCount,
+          isSpeaking
+        }
+      });
     }
-  }, [characteristics, isCapturing, useASRModel, asrMetrics, analysisCount]);
+  }, [characteristics, isCapturing, useASRModel, asrMetrics, analysisCount, shouldAnalyze, isSpeaking]);
   
   // Store last valid values
   useEffect(() => {
@@ -603,52 +857,66 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
     }
   }, [characteristics]);
   
-  // Performance monitoring
+  // Performance monitoring using requestAnimationFrame for better sync with browser rendering
   useEffect(() => {
     if (isCapturing && characteristics) {
-      const startTime = performance.now();
+      const monitorPerformance = () => {
+        const startTime = performance.now();
+        
+        // Schedule the next frame
+        animationFrameRef.current = requestAnimationFrame(() => {
+          const endTime = performance.now();
+          const renderTime = endTime - startTime;
+          
+          const now = Date.now();
+          let interval = 0;
+          
+          if (performanceMetrics.lastRenderTimestamp > 0) {
+            const rawInterval = now - performanceMetrics.lastRenderTimestamp;
+            interval = Math.max(16.67, rawInterval); // Cap at 60fps
+          }
+          
+          setPerformanceMetrics(prev => ({
+            renderTime,
+            updateInterval: interval || prev.updateInterval,
+            lastRenderTimestamp: now
+          }));
+          
+          // Continue monitoring in next frame
+          monitorPerformance();
+        });
+      };
       
-      const rafId = requestAnimationFrame(() => {
-        const endTime = performance.now();
-        const renderTime = endTime - startTime;
-        
-        const now = Date.now();
-        let interval = 0;
-        
-        if (performanceMetrics.lastRenderTimestamp > 0) {
-          const rawInterval = now - performanceMetrics.lastRenderTimestamp;
-          interval = Math.max(16.67, rawInterval);
+      // Start the monitoring loop
+      monitorPerformance();
+      
+      return () => {
+        // Clean up animation frame on unmount
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
         }
-        
-        setPerformanceMetrics(prev => ({
-          renderTime,
-          updateInterval: interval || prev.updateInterval,
-          lastRenderTimestamp: now
-        }));
-      });
-      
-      return () => cancelAnimationFrame(rafId);
+      };
     }
-  }, [characteristics, isCapturing, performanceMetrics.lastRenderTimestamp]);
+  }, []);  // Empty dependency array to only run once
   
   // Memoize the metrics values to prevent unnecessary calculations
   const metricValues = useMemo(() => {
     return {
       fluency: useASRModel 
-        ? asrMetrics.fluencyScore * 100 
+        ? throttledMetrics.fluencyScore * 100 
         : (characteristics?.fluency?.confidence ?? 0) * 100,
       tempo: useASRModel 
-        ? asrMetrics.tempoScore * 100 
+        ? throttledMetrics.tempoScore * 100 
         : (characteristics?.tempo?.confidence ?? 0) * 100,
       pronunciation: useASRModel 
-        ? asrMetrics.pronunciationScore * 100 
+        ? throttledMetrics.pronunciationScore * 100 
         : (characteristics?.pronunciation?.confidence ?? 0) * 100
     };
   }, [
     useASRModel, 
-    asrMetrics.fluencyScore, 
-    asrMetrics.tempoScore, 
-    asrMetrics.pronunciationScore,
+    throttledMetrics.fluencyScore, 
+    throttledMetrics.tempoScore, 
+    throttledMetrics.pronunciationScore,
     characteristics?.fluency?.confidence,
     characteristics?.tempo?.confidence,
     characteristics?.pronunciation?.confidence
@@ -706,6 +974,88 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
     return null;
   }
 
+  // Add a speech activity indicator in the UI
+  const SpeechActivityIndicator = () => {
+    // Pulsing animation for the waiting indicator
+    const pulseAnimation = waitingForVoice ? `
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0.7); }
+        70% { box-shadow: 0 0 0 6px rgba(255, 165, 0, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0); }
+      }
+    ` : '';
+    
+    return (
+      <>
+        {pulseAnimation && <style>{pulseAnimation}</style>}
+        <Box sx={{ 
+          position: 'absolute', 
+          top: 10, 
+          right: 10, 
+          width: 10, 
+          height: 10,
+          borderRadius: '50%',
+          backgroundColor: isSpeaking ? '#2ecc71' : waitingForVoice ? '#f39c12' : 'transparent',
+          border: `1px solid ${alpha(theme.palette.divider, 0.3)}`,
+          transition: 'background-color 0.2s ease-in-out',
+          boxShadow: isSpeaking 
+            ? `0 0 5px #2ecc71` 
+            : waitingForVoice 
+              ? '0 0 0 0 rgba(255, 165, 0, 0.7)' 
+              : 'none',
+          animation: waitingForVoice ? 'pulse 2s infinite' : 'none'
+        }} />
+      </>
+    );
+  };
+
+  const VoiceWaitingMessage = () => {
+    if (!waitingForVoice) return null;
+    
+    return (
+      <Fade in={waitingForVoice} timeout={500}>
+        <Box sx={{ 
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: alpha(theme.palette.background.paper, 0.7),
+          borderRadius: 2,
+          zIndex: 10
+        }}>
+          <Box sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 2,
+            p: 3,
+            backgroundColor: alpha(theme.palette.background.default, 0.9),
+            borderRadius: 2,
+            boxShadow: theme.shadows[4]
+          }}>
+            <MicIcon sx={{ fontSize: '2rem', color: theme.palette.warning.main, mb: 1 }} />
+            <Typography variant="h6" sx={{ fontWeight: 500 }}>
+              Waiting for voice...
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center' }}>
+              Please speak into your microphone
+            </Typography>
+            {lastDetectedSpeech && (
+              <Typography variant="caption" sx={{ mt: 1, color: 'text.disabled' }}>
+                Last speech detected {Math.floor((Date.now() - lastDetectedSpeech) / 1000)}s ago
+              </Typography>
+            )}
+          </Box>
+        </Box>
+      </Fade>
+    );
+  };
+
+  // Replace the content rendering with more efficient rendering
   const content = (
     <Box sx={{ 
       width: '100%', 
@@ -713,10 +1063,12 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       px: 1,
       position: 'relative',
       overflow: 'hidden',
-      minHeight: 300, // Add minimum height to prevent container resizing
+      minHeight: 300,
       display: 'flex',
       flexDirection: 'column'
     }}>
+      <SpeechActivityIndicator />
+      
       {useASRModel && (
         <Box sx={{ 
           display: 'flex', 
@@ -739,7 +1091,7 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
               fontWeight: 600,
               whiteSpace: 'nowrap'
             }}>
-              Speech Metrics
+              Speech Metrics {isSpeaking && "(Active)"} {waitingForVoice && "(Waiting for voice)"}
             </Typography>
             <Box sx={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {isProcessing && (
@@ -749,16 +1101,16 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
           </Box>
           
           <Chip
-            label={`Score: ${Math.round(asrMetrics.overallScore * 100)}`}
+            label={`Score: ${Math.round(throttledMetrics.overallScore * 100)}`}
             size="small"
             sx={{
               height: 24,
               fontSize: '0.8rem',
               fontWeight: 600,
               borderRadius: '4px',
-              backgroundColor: getScoreColor(asrMetrics.overallScore),
+              backgroundColor: getScoreColor(throttledMetrics.overallScore),
               color: 'white',
-              minWidth: 80, // Fix minimum width
+              minWidth: 80,
               flexShrink: 0
             }}
           />
@@ -800,13 +1152,23 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
           width: '100%'
         }}>
           <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-            <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, height: 20 }}>Words: {Math.round(asrMetrics.wordCount)}</Typography>
-            <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', height: 18 }}>Rate: {Math.round(asrMetrics.wordsPerMinute)} wpm</Typography>
+            <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, height: 20 }}>
+              Words: {Math.round(throttledMetrics.wordCount)}
+            </Typography>
+            <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', height: 18 }}>
+              Rate: {Math.round(throttledMetrics.wordsPerMinute)} wpm
+            </Typography>
           </Box>
           
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-            <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, height: 20 }}>Silence: {Math.round(asrMetrics.silenceRatio * 100)}%</Typography>
-            <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', height: 18 }}>Confidence: {Math.round(asrMetrics.confidence * 100)}%</Typography>
+            <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, height: 20 }}>
+              Silence: {Math.round(throttledMetrics.silenceRatio * 100)}%
+            </Typography>
+            <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', height: 18 }}>
+              {performanceMetrics.renderTime > 10 ? 
+                `Render: ${Math.round(performanceMetrics.renderTime)}ms` : 
+                `Confidence: ${Math.round(throttledMetrics.confidence * 100)}%`}
+            </Typography>
           </Box>
         </Box>
       )}
@@ -824,6 +1186,8 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
           </Button>
         </Box>
       )}
+      
+      <VoiceWaitingMessage />
     </Box>
   );
 
