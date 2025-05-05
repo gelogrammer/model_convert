@@ -9,7 +9,6 @@ import Recordings from './components/Recordings';
 import { initializeWebSocket, closeWebSocket, setAudioProcessingEnabled } from './services/websocket';
 import { saveRecordingToDatabase } from './services/recordingsService';
 import './App.css';
-import { analyzeAudioWithModel } from './services/analysisService';
 
 // Create a theme
 const theme = createTheme({
@@ -231,7 +230,6 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isModelInitialized, setIsModelInitialized] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [emotionResult, setEmotionResult] = useState<EmotionResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -682,19 +680,6 @@ function App() {
     // Reset the latest recording ID
     setLatestRecordingId(null);
   };
-
-  // Add a function to check if the response indicates HuggingFace API unavailability
-  const checkHuggingFaceAvailability = (response: any) => {
-    // Check if the response has a special indicator that we're using fallback mode
-    if (response && response._meta && response._meta.using_fallback === true) {
-      setIsHuggingFaceAvailable(false);
-      
-      // Set a timer to try again after 2 minutes
-      setTimeout(() => {
-        setIsHuggingFaceAvailable(true);
-      }, 2 * 60 * 1000); // 2 minutes
-    }
-  };
   
   useEffect(() => {
     // Check for stored API availability on start
@@ -717,60 +702,6 @@ function App() {
       }
     }
   }, []);
-  
-  // Implement the processAudioData function to process audio and check for API availability
-  const processAudioData = async (audioBlob: Blob) => {
-    if (!audioBlob || !isCapturing) return;
-    
-    try {
-      // Process the audio with the model
-      const result = await analyzeAudioWithModel(audioBlob);
-      
-      // Check if the result indicates HuggingFace API unavailability
-      if (result && '_meta' in result && result._meta && result._meta.using_fallback === true) {
-        setIsHuggingFaceAvailable(false);
-        
-        // Store the API unavailability in localStorage with a timestamp
-        localStorage.setItem('huggingFaceApiAvailable', 'false');
-        localStorage.setItem('huggingFaceApiUnavailableTime', Date.now().toString());
-        
-        // Set a timer to try again after 2 minutes
-        setTimeout(() => {
-          setIsHuggingFaceAvailable(true);
-          localStorage.removeItem('huggingFaceApiAvailable');
-          localStorage.removeItem('huggingFaceApiUnavailableTime');
-        }, 2 * 60 * 1000); // 2 minutes
-      } else if (result && !('_meta' in result)) {
-        // If we get a successful result with no meta tag, the API is working
-        setIsHuggingFaceAvailable(true);
-        localStorage.removeItem('huggingFaceApiAvailable');
-        localStorage.removeItem('huggingFaceApiUnavailableTime');
-      }
-      
-      // Process the emotion result
-      if (result) {
-        // Format the result to match our EmotionResult type
-        const formattedResult: EmotionResult = {
-          emotion: result.emotion,
-          confidence: result.confidence,
-          probabilities: result.probabilities,
-          speech_rate: result.speechRate,
-          is_speech: true,
-          speech_characteristics: result.speechCharacteristics || undefined
-        };
-        
-        // Update the emotion result state
-        setEmotionResult(formattedResult);
-        
-        // If we have speech characteristics, update the last speech characteristics
-        if (formattedResult.speech_characteristics) {
-          setLastSpeechCharacteristics(formattedResult.speech_characteristics);
-        }
-      }
-    } catch (error) {
-      console.error("Error processing audio:", error);
-    }
-  };
   
   return (
     <ThemeProvider theme={theme}>
@@ -1079,14 +1010,17 @@ function App() {
                   width: { xs: '100%', md: '46%', lg: '50%' },
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: { xs: 1, md: 1.5 }
+                  gap: { xs: 1, md: 1.5 },
+                  height: { xs: 'auto', md: '100%' }
                 }}>
                   <Paper sx={{ 
                     p: { xs: 0.75, md: 1.25 },
                     borderRadius: '12px',
                     background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
                     backdropFilter: 'blur(10px)',
-                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
+                    height: '100%',
+                    flexGrow: 1
                   }}>
                     <EmotionDisplay
                       emotionResult={isCapturing && isSpeaking ? emotionResult : null}
@@ -1095,21 +1029,22 @@ function App() {
                     />
                   </Paper>
                   
-                  {/* Show Recordings (was Speech Characteristics) */}
-                  <Paper sx={{ 
-                    p: { xs: 0.75, md: 1.25 },
-                    borderRadius: '12px',
-                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
-                    backdropFilter: 'blur(10px)',
-                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
-                    display: isCapturing ? 'none' : 'block'
-                  }}>
-                    <Recordings 
-                      isCapturing={isCapturing} 
-                      recordingToAnalyze={latestRecordingId}
-                      onAnalysisComplete={handleAnalysisComplete}
-                    />
-                  </Paper>
+                  {/* Show Recordings only when not capturing */}
+                  {!isCapturing && (
+                    <Paper sx={{ 
+                      p: { xs: 0.75, md: 1.25 },
+                      borderRadius: '12px',
+                      background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                    }}>
+                      <Recordings 
+                        isCapturing={isCapturing} 
+                        recordingToAnalyze={latestRecordingId}
+                        onAnalysisComplete={handleAnalysisComplete}
+                      />
+                    </Paper>
+                  )}
                 </Box>
                 
                 {/* Right column: Feedback */}
