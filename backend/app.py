@@ -40,10 +40,11 @@ app = Flask(__name__)
 CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"], supports_credentials=True)
 
 # Configure Socket.IO with CORS for Render
+# Use gevent async mode for better compatibility with gunicorn
 socketio = SocketIO(
     app, 
     cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"], 
-    async_mode='eventlet'
+    async_mode='gevent'
 )
 
 # Initialize model services
@@ -580,5 +581,5 @@ if __name__ == '__main__':
     # Get the port from the environment variable or use default
     port = int(os.environ.get('PORT', 5001))
     
-    # Start the Socket.IO server
+    # Start the Socket.IO server with gevent
     socketio.run(app, host='0.0.0.0', port=port, debug=False)

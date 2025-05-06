@@ -5,7 +5,7 @@ services:
     region: oregon
     plan: standard
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: gunicorn app:app --worker-class eventlet --workers 1 --timeout 120
+    startCommand: gunicorn app:app --worker-class gevent --workers 1 --timeout 120
     healthCheckPath: /api/health
     envVars:
       - key: FLASK_ENV
