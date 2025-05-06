@@ -19,14 +19,23 @@ app = Flask(__name__)
 # Set up proper CORS handling for all routes
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
+    # Get the origin from the request headers
+    origin = request.headers.get('Origin')
+    
+    # If origin is in the allowed origins, set it specifically
+    if origin:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+    else:
+        # Fallback to wildcard only if no origin is specified
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# Configure CORS for Render deployment
-# Allow any Render domains (*.onrender.com) and local development and Cloudflare pages
-CORS(app, origins=["*"], 
+# Configure CORS for Render deployment with specific origins approach
+CORS(app, 
+     origins=["*"],
      supports_credentials=True,
      allow_headers=["*"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
