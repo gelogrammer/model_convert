@@ -21,7 +21,7 @@ app = Flask(__name__)
 CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", 
                   "https://model-convert.pages.dev", "https://*.pages.dev", 
                   "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
-                  "https://*.model-convert.pages.dev",
+                  "https://*.model-convert.pages.dev", "https://61658fdf.model-convert.pages.dev",
                   "https://model-convert-backend.onrender.com"], 
      supports_credentials=True)
 
@@ -32,7 +32,7 @@ socketio = SocketIO(
     cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", 
                          "https://model-convert.pages.dev", "https://*.pages.dev", 
                          "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
-                         "https://*.model-convert.pages.dev",
+                         "https://*.model-convert.pages.dev", "https://61658fdf.model-convert.pages.dev",
                          "https://model-convert-backend.onrender.com"]
 )
 

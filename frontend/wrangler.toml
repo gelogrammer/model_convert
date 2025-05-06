@@ -1,0 +1,10 @@
+name = "model-convert"
+compatibility_date = "2023-10-30"
+
+[build]
+command = "npm run build"
+output_directory = "dist"
+pages_build_output_dir = "dist"
+
+[env.production]
+vars = { VITE_BACKEND_URL = "https://name-model-convert-backend.onrender.com", VITE_API_URL = "https://name-model-convert-backend.onrender.com" } 
