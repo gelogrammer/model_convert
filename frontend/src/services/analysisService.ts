@@ -19,7 +19,7 @@ let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
 
 // Get the API URL from environment variables
-const getApiUrl = () => {
+export const getApiUrl = () => {
   // Check both environment variable names to ensure compatibility
   return import.meta.env.VITE_API_URL || 
          import.meta.env.VITE_BACKEND_URL || 

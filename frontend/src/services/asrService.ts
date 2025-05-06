@@ -4,6 +4,7 @@
  */
 
 import { convertToWav } from './audioService';
+import { getApiUrl } from './analysisService';
 
 // Metrics storage for tracking speech patterns over time
 interface SpeechMetrics {
@@ -82,7 +83,11 @@ export const analyzeSpeech = async (audioData: Float32Array): Promise<{
     const timeoutId = setTimeout(() => controller.abort(), 3000); // 3-second timeout
     
     try {
-      const response = await fetch('/api/analyze', {
+      // Get the API URL from environment variables
+      const apiUrl = getApiUrl();
+      console.log('Sending analyze request to:', `${apiUrl}/api/analyze`);
+      
+      const response = await fetch(`${apiUrl}/api/analyze`, {
         method: 'POST',
         body: formData,
         signal: controller.signal
