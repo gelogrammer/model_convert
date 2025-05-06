@@ -332,10 +332,14 @@ function App() {
 
         // Initialize model
         try {
-          // Get the API URL from environment variables
+          // Get the API URL from environment variables with a fallback to window.__env
           const apiUrl = import.meta.env.VITE_API_URL || 
-                        import.meta.env.VITE_BACKEND_URL || 
-                        'http://localhost:5001';
+                         import.meta.env.VITE_BACKEND_URL ||
+                         (window as any).__env?.VITE_API_URL ||
+                         (window as any).__env?.VITE_BACKEND_URL ||
+                         'https://name-model-convert-backend.onrender.com';
+          
+          console.log('Using API URL:', apiUrl);
           
           const response = await fetch(`${apiUrl}/api/initialize`, {
             method: 'POST',

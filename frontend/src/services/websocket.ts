@@ -67,7 +67,9 @@ const testBackendConnectivity = async (): Promise<boolean> => {
     // Get the API URL from environment variables
     const apiUrl = import.meta.env.VITE_API_URL || 
                   import.meta.env.VITE_BACKEND_URL || 
-                  'http://localhost:5001';
+                  (window as any).__env?.VITE_API_URL ||
+                  (window as any).__env?.VITE_BACKEND_URL ||
+                  'https://name-model-convert-backend.onrender.com';
     
     // Use the health endpoint to check if backend is up
     const controller = new AbortController();
@@ -93,7 +95,9 @@ const connectSocket = (handlers: WebSocketHandlers) => {
   // Get the API URL from environment variables
   const apiUrl = import.meta.env.VITE_API_URL || 
                 import.meta.env.VITE_BACKEND_URL || 
-                'http://localhost:5001';
+                (window as any).__env?.VITE_API_URL ||
+                (window as any).__env?.VITE_BACKEND_URL ||
+                'https://name-model-convert-backend.onrender.com';
   
   console.log(`Connecting to WebSocket server at ${apiUrl}`);
   

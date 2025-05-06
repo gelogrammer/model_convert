@@ -23,7 +23,9 @@ const getApiUrl = () => {
   // Check both environment variable names to ensure compatibility
   return import.meta.env.VITE_API_URL || 
          import.meta.env.VITE_BACKEND_URL || 
-         'http://localhost:5001';
+         (window as any).__env?.VITE_API_URL ||
+         (window as any).__env?.VITE_BACKEND_URL ||
+         'https://name-model-convert-backend.onrender.com';
 };
 
 // Silent fetch utility that doesn't output to console
