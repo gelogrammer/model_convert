@@ -10,7 +10,6 @@ import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
-import eventlet
 import requests
 import time
 try:
@@ -40,11 +39,10 @@ app = Flask(__name__)
 CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"], supports_credentials=True)
 
 # Configure Socket.IO with CORS for Render
-# Use gevent async mode for better compatibility with gunicorn
+# Use threading mode which is the default and works with standard worker
 socketio = SocketIO(
     app, 
-    cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"], 
-    async_mode='gevent'
+    cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"]
 )
 
 # Initialize model services
@@ -581,5 +579,5 @@ if __name__ == '__main__':
     # Get the port from the environment variable or use default
     port = int(os.environ.get('PORT', 5001))
     
-    # Start the Socket.IO server with gevent
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    # Start the Socket.IO server with threading
+    socketio.run(app, host='0.0.0.0', port=port)

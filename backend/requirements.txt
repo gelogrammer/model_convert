@@ -7,7 +7,6 @@ librosa>=0.8.1
 matplotlib>=3.7.2
 python-engineio==4.8.0
 python-socketio==5.10.0
-eventlet==0.30.2
 torch>=1.13.0
 requests==2.31.0
 transformers>=4.38.0

@@ -28,18 +28,18 @@ if [ ! -s models/ASR.pth ]; then
 fi
 
 echo "Installing specific packages needed for the web server..."
-pip install gunicorn==20.1.0 gevent==23.9.1
+pip install gunicorn==20.1.0
 
 echo "Installing requirements..."
 pip install -r requirements.txt
 
-# Verify gunicorn and gevent installation
+# Verify gunicorn installation
 if ! command -v gunicorn &> /dev/null; then
     echo "Gunicorn not found, installing directly..."
-    pip install gunicorn==20.1.0 gevent==23.9.1
+    pip install gunicorn==20.1.0
 fi
 
 echo "Checking installed packages..."
-pip list | grep -E "gunicorn|gevent|eventlet|flask-socketio|python-socketio"
+pip list | grep -E "gunicorn|flask-socketio|python-socketio"
 
 echo "Build process completed." 
