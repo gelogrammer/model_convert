@@ -22,7 +22,9 @@ CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://loca
                   "https://model-convert.pages.dev", "https://*.pages.dev", 
                   "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
                   "https://*.model-convert.pages.dev", "https://61658fdf.model-convert.pages.dev",
-                  "https://model-convert-backend.onrender.com"], 
+                  "https://32377a35.model-convert.pages.dev",
+                  "https://model-convert-backend.onrender.com",
+                  "https://name-model-convert-backend.onrender.com"], 
      supports_credentials=True)
 
 # Configure Socket.IO with CORS for Render
@@ -33,7 +35,9 @@ socketio = SocketIO(
                          "https://model-convert.pages.dev", "https://*.pages.dev", 
                          "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
                          "https://*.model-convert.pages.dev", "https://61658fdf.model-convert.pages.dev",
-                         "https://model-convert-backend.onrender.com"]
+                         "https://32377a35.model-convert.pages.dev",
+                         "https://model-convert-backend.onrender.com",
+                         "https://name-model-convert-backend.onrender.com"]
 )
 
 # Initialize model services to None - they'll be loaded on demand
