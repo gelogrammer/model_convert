@@ -9,6 +9,11 @@ window.__env = {
 };
 `;
 
+// Ensure public directory exists
+if (!fs.existsSync('./public')) {
+  fs.mkdirSync('./public', { recursive: true });
+}
+
 // Write to a file that will be included in the HTML
 fs.writeFileSync('./public/env-config.js', envConfigContent);
 console.log('Environment configuration written to public/env-config.js'); 
