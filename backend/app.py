@@ -12,24 +12,6 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import requests
 import time
-try:
-    import torch
-    from transformers import pipeline
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    print("Warning: transformers or torch not available. Using fallback approach for Hugging Face API.")
-    TRANSFORMERS_AVAILABLE = False
-
-# Import our model services - with error handling
-try:
-    from model_service import ModelService
-    from audio_processor import AudioProcessor
-    from asr_service import ASRService
-    MODELS_IMPORTABLE = True
-except ImportError as e:
-    print(f"Warning: Could not import model services: {e}")
-    print("The API will run in limited functionality mode.")
-    MODELS_IMPORTABLE = False
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -45,17 +27,49 @@ socketio = SocketIO(
     cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"]
 )
 
-# Initialize model services
+# Initialize model services to None - they'll be loaded on demand
 model_service = None
 audio_processor = None
 asr_service = None
+MODELS_LOADED = False
 
-# Auto-initialize the models on startup
-def initialize_on_startup():
-    global model_service, audio_processor, asr_service
+# Import model-related modules lazily when needed
+def import_model_modules():
+    """Import ML-related modules only when needed"""
+    global TRANSFORMERS_AVAILABLE, MODELS_IMPORTABLE
     
-    if not MODELS_IMPORTABLE:
-        print("Models not importable, skipping initialization")
+    try:
+        import torch
+        from transformers import pipeline
+        TRANSFORMERS_AVAILABLE = True
+    except ImportError:
+        print("Warning: transformers or torch not available. Using fallback approach for Hugging Face API.")
+        TRANSFORMERS_AVAILABLE = False
+    
+    # Import our model services - with error handling
+    try:
+        global ModelService, AudioProcessor, ASRService
+        from model_service import ModelService
+        from audio_processor import AudioProcessor
+        from asr_service import ASRService
+        MODELS_IMPORTABLE = True
+        return True
+    except ImportError as e:
+        print(f"Warning: Could not import model services: {e}")
+        print("The API will run in limited functionality mode.")
+        MODELS_IMPORTABLE = False
+        return False
+
+def initialize_models_if_needed():
+    """Initialize models only when needed"""
+    global model_service, audio_processor, asr_service, MODELS_LOADED
+    
+    # If models are already loaded, don't load again
+    if MODELS_LOADED:
+        return True
+        
+    # Import the model modules
+    if not import_model_modules():
         return False
     
     # Default model paths
@@ -101,15 +115,11 @@ def initialize_on_startup():
             asr_service = None
         
         print("All services initialized successfully")
+        MODELS_LOADED = True
         return True
     except Exception as e:
         print(f"Error initializing models: {e}")
         return False
-
-# Try to initialize models, but don't fail if they can't be loaded
-model_init_success = initialize_on_startup()
-if not model_init_success:
-    print("Model initialization failed. The API will run with limited functionality.")
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -117,12 +127,15 @@ def health_check():
     return jsonify({
         "status": "ok", 
         "message": "Speech Emotion Recognition API is running",
-        "model_status": "loaded" if model_service else "not_loaded"
+        "model_status": "loaded" if MODELS_LOADED else "not_loaded"
     })
 
 @app.route('/api/initialize', methods=['POST'])
 def initialize_model():
     """Initialize the model with the provided path"""
+    if not import_model_modules():
+        return jsonify({"status": "error", "message": "Could not import model modules"}), 500
+        
     global model_service, audio_processor, asr_service
     
     data = request.json
@@ -154,6 +167,13 @@ def initialize_model():
 @app.route('/api/analyze', methods=['POST'])
 def analyze_audio():
     """Analyze audio data for emotion"""
+    # Initialize models if not already loaded
+    if not MODELS_LOADED and not initialize_models_if_needed():
+        return jsonify({
+            "status": "error", 
+            "message": "Models could not be initialized. Try again later or contact support."
+        }), 500
+    
     global model_service, audio_processor, asr_service
     
     if model_service is None:
