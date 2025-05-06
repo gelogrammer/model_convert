@@ -21,10 +21,16 @@ except ImportError:
     print("Warning: transformers or torch not available. Using fallback approach for Hugging Face API.")
     TRANSFORMERS_AVAILABLE = False
 
-# Import our model services
-from model_service import ModelService
-from audio_processor import AudioProcessor
-from asr_service import ASRService
+# Import our model services - with error handling
+try:
+    from model_service import ModelService
+    from audio_processor import AudioProcessor
+    from asr_service import ASRService
+    MODELS_IMPORTABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import model services: {e}")
+    print("The API will run in limited functionality mode.")
+    MODELS_IMPORTABLE = False
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -49,6 +55,10 @@ asr_service = None
 def initialize_on_startup():
     global model_service, audio_processor, asr_service
     
+    if not MODELS_IMPORTABLE:
+        print("Models not importable, skipping initialization")
+        return False
+    
     # Default model paths
     ser_model_path = 'models/SER.h5'
     asr_model_path = 'models/ASR.pth'
@@ -57,13 +67,30 @@ def initialize_on_startup():
     os.makedirs('models', exist_ok=True)
     
     try:
+        # Check if models exist and have content
+        if not os.path.exists(ser_model_path) or os.path.getsize(ser_model_path) == 0:
+            print(f"Warning: SER model file is missing or empty: {ser_model_path}")
+            return False
+            
+        if not os.path.exists(asr_model_path) or os.path.getsize(asr_model_path) == 0:
+            print(f"Warning: ASR model file is missing or empty: {asr_model_path}")
+            # We can continue without ASR
+        
         # Initialize SER model service
         print(f"Initializing SER model from {ser_model_path}")
-        model_service = ModelService(ser_model_path)
+        try:
+            model_service = ModelService(ser_model_path)
+        except Exception as e:
+            print(f"Error initializing SER model: {e}")
+            return False
         
         # Initialize audio processor
         print("Initializing audio processor")
-        audio_processor = AudioProcessor()
+        try:
+            audio_processor = AudioProcessor()
+        except Exception as e:
+            print(f"Error initializing audio processor: {e}")
+            return False
         
         # Initialize ASR model service
         try:
@@ -80,13 +107,19 @@ def initialize_on_startup():
         print(f"Error initializing models: {e}")
         return False
 
-# Run initialization
-initialize_on_startup()
+# Try to initialize models, but don't fail if they can't be loaded
+model_init_success = initialize_on_startup()
+if not model_init_success:
+    print("Model initialization failed. The API will run with limited functionality.")
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({"status": "ok", "message": "Speech Emotion Recognition API is running"})
+    return jsonify({
+        "status": "ok", 
+        "message": "Speech Emotion Recognition API is running",
+        "model_status": "loaded" if model_service else "not_loaded"
+    })
 
 @app.route('/api/initialize', methods=['POST'])
 def initialize_model():

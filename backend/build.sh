@@ -2,6 +2,10 @@
 # Create models directory
 mkdir -p models
 
+# Upgrade pip first
+echo "Upgrading pip..."
+pip install --upgrade pip
+
 # Download models from storage service
 # Using publicly accessible URLs for these models
 # Replace these with your actual URLs if you have them
@@ -12,7 +16,27 @@ curl -L -o models/SER.h5 https://huggingface.co/datasets/username/speech-emotion
 echo "Downloading ASR.pth model..."
 curl -L -o models/ASR.pth https://huggingface.co/datasets/username/speech-emotion-models/resolve/main/ASR.pth
 
+# Create empty model files if download failed
+if [ ! -s models/SER.h5 ]; then
+    echo "SER.h5 download failed, creating empty file for testing"
+    touch models/SER.h5
+fi
+
+if [ ! -s models/ASR.pth ]; then
+    echo "ASR.pth download failed, creating empty file for testing"
+    touch models/ASR.pth
+fi
+
 echo "Installing requirements..."
 pip install -r requirements.txt
+
+# Verify gunicorn installation
+if ! command -v gunicorn &> /dev/null; then
+    echo "Gunicorn not found, installing directly..."
+    pip install gunicorn eventlet
+fi
+
+echo "Checking installed packages..."
+pip list
 
 echo "Build process completed." 
