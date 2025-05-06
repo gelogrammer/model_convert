@@ -185,10 +185,24 @@ export const analyzeSpeech = async (audioData: Float32Array): Promise<{
     } catch (fetchError) {
       // Clear timeout if fetch errors out
       clearTimeout(timeoutId);
+      
+      // Handle abort errors gracefully
+      if (typeof fetchError === 'object' && fetchError !== null && 'name' in fetchError && fetchError.name === 'AbortError') {
+        console.info('ASR request timed out, skipping analysis');
+        return null;
+      }
+      
       throw fetchError;
     }
   } catch (error) {
     console.error('Error in ASR analysis:', error);
+    
+    // Handle AbortError specifically to avoid showing error in console
+    if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') {
+      console.info('ASR analysis aborted - ignoring');
+      return null;
+    }
+    
     // Return null instead of dummy data
     return null;
   } finally {

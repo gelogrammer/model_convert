@@ -1,5 +1,5 @@
 import { getRecordedAudio, getAudioAnalysisResult } from './audioService';
-import { uploadRecording, getRecordings as fetchSupabaseRecordings, deleteRecording as deleteSupabaseRecording, saveAudioAnalysis, testSupabaseConnection } from './supabaseService';
+import { uploadRecording, getRecordings as fetchSupabaseRecordings, deleteRecording as deleteSupabaseRecording, saveAudioAnalysis, testSupabaseConnection, renameRecording as renameSupabaseRecording } from './supabaseService';
 
 // Interface for recording data
 export interface Recording {
@@ -1019,6 +1019,66 @@ export const deleteRecording = async (id: number): Promise<boolean> => {
     }
   } catch (error) {
     console.error('Error deleting recording:', error);
+    return false;
+  }
+};
+
+// Rename a recording with localStorage fallback
+export const renameRecording = async (id: number, newName: string): Promise<boolean> => {
+  try {
+    // Ensure the name is properly formatted
+    let formattedNewName = newName.trim();
+    
+    // Check if this is a localStorage recording (id will be a number but converted from a string like "local_1234567890")
+    const localRecordingsStr = localStorage.getItem('audioRecordings');
+    if (localRecordingsStr) {
+      const localRecordings: LocalRecording[] = JSON.parse(localRecordingsStr);
+      
+      // If we have the same number of local recordings as the id, this might be a localStorage recording
+      if (id <= localRecordings.length) {
+        // Find the recording
+        const recordingIndex = id - 1;
+        if (recordingIndex >= 0 && recordingIndex < localRecordings.length) {
+          const recording = localRecordings[recordingIndex];
+          
+          // Extract file extension to preserve it
+          const oldName = recording.name;
+          const ext = oldName.split('.').pop() || 'wav';
+          
+          // Make sure new name has the right extension
+          if (!formattedNewName.toLowerCase().endsWith(`.${ext}`)) {
+            formattedNewName = `${formattedNewName}.${ext}`;
+          }
+          
+          // Update the recording name
+          recording.name = formattedNewName;
+          
+          // Save updated recordings to localStorage
+          localStorage.setItem('audioRecordings', JSON.stringify(localRecordings));
+          console.log('Renamed recording in localStorage');
+          return true;
+        }
+      }
+    }
+    
+    // If not a localStorage recording, try Supabase
+    try {
+      const result = await renameSupabaseRecording(id, formattedNewName);
+      const { error } = result as { data: any, error: any };
+      
+      if (error) {
+        console.error('Supabase rename error:', error);
+        throw new Error('Supabase rename failed');
+      }
+      
+      console.log('Successfully renamed recording in Supabase');
+      return true;
+    } catch (supabaseError) {
+      console.error('Failed to rename in Supabase:', supabaseError);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error renaming recording:', error);
     return false;
   }
 };

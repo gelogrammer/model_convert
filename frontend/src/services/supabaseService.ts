@@ -881,4 +881,58 @@ export const testSupabaseConnection = async (): Promise<{ connected: boolean; me
       message: `Unexpected error: ${error instanceof Error ? error.message : String(error)}`
     };
   }
+};
+
+// Function to rename a recording
+export const renameRecording = async (id: number, newName: string): Promise<{ data: any; error: any }> => {
+  try {
+    console.log(`Renaming recording with ID ${id} to "${newName}"`);
+    
+    // Get current recording first to obtain file extension
+    const { data: recording, error: fetchError } = await supabase
+      .from('recordings')
+      .select('file_name, file_path')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError) {
+      console.error('Error fetching recording for rename:', fetchError);
+      return { data: null, error: fetchError };
+    }
+    
+    if (!recording) {
+      console.error('Recording not found for rename');
+      return { data: null, error: new Error('Recording not found') };
+    }
+    
+    // Extract file extension from current filename
+    const currentExt = recording.file_name.split('.').pop() || 'wav';
+    
+    // Make sure new name has the right extension
+    let formattedNewName = newName;
+    if (!formattedNewName.toLowerCase().endsWith(`.${currentExt}`)) {
+      formattedNewName = `${formattedNewName}.${currentExt}`;
+    }
+    
+    // Update the recording in the database
+    const { data, error } = await supabase
+      .from('recordings')
+      .update({
+        file_name: formattedNewName,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select();
+    
+    if (error) {
+      console.error('Error renaming recording in database:', error);
+      return { data: null, error };
+    }
+    
+    console.log('Recording renamed successfully in database');
+    return { data, error: null };
+  } catch (error) {
+    console.error('Exception in renameRecording:', error);
+    return { data: null, error };
+  }
 }; 

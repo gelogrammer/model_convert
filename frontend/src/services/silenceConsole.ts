@@ -15,7 +15,9 @@ const silencedPatterns = [
   'ping timeout',
   'timeout',
   'WebSocket is closed',
-  'WebSocket connection to'
+  'WebSocket connection to',
+  'AbortError',
+  'signal is aborted'
 ];
 
 // Override console methods to filter out specific errors

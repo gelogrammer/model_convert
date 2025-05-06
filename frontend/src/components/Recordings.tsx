@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Paper, Typography, Box, List, ListItem, ListItemText, IconButton, Divider, Button, CircularProgress, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, alpha, Chip, Tooltip } from '@mui/material';
+import { Paper, Typography, Box, List, ListItem, ListItemText, IconButton, Divider, Button, CircularProgress, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, alpha, Chip, Tooltip, TextField } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -9,7 +9,8 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import SettingsIcon from '@mui/icons-material/Settings';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
-import { fetchRecordings, deleteRecording as apiDeleteRecording, Recording as DBRecording, convertAudioForBrowserPlayback } from '../services/recordingsService';
+import EditIcon from '@mui/icons-material/Edit';
+import { fetchRecordings, deleteRecording as apiDeleteRecording, renameRecording as apiRenameRecording, Recording as DBRecording, convertAudioForBrowserPlayback } from '../services/recordingsService';
 import { AudioAnalysisResult } from '../services/audioService';
 import { testSupabaseConnection, saveViewAnalysis } from '../services/supabaseService';
 
@@ -54,6 +55,13 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<{connected: boolean, message: string} | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
+  
+  // Add states for renaming recordings
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [recordingToRename, setRecordingToRename] = useState<number | null>(null);
+  const [newRecordingName, setNewRecordingName] = useState('');
+  const [renameInProgress, setRenameInProgress] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   
   // Test Supabase connection
   const checkSupabaseConnection = async () => {
@@ -758,7 +766,13 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
   // Get recording filename by ID
   const getRecordingName = (id: number): string => {
     const recording = recordings.find(rec => rec.id === id);
-    return recording ? recording.file_name : 'Recording';
+    if (!recording) return "Recording";
+    
+    // Clean up name for display
+    return recording.file_name
+      .replace(/_/g, ' ')
+      .replace(/\.(wav|mp3|webm|ogg)$/i, '')
+      .replace(/recording/i, 'Recording');
   };
 
   // Format percentage value
@@ -1217,6 +1231,73 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
     }
   };
 
+  // Function to open rename dialog
+  const openRenameDialog = (id: number) => {
+    const recording = recordings.find(rec => rec.id === id);
+    if (recording) {
+      // Remove file extension for editing
+      const nameWithoutExt = recording.file_name.split('.')[0];
+      // Clean up the name for display
+      const cleanName = nameWithoutExt.replace(/_/g, ' ').replace(/recording/i, 'Recording');
+      
+      setRecordingToRename(id);
+      setNewRecordingName(cleanName);
+      setRenameDialogOpen(true);
+      setRenameError(null);
+    }
+  };
+
+  // Function to close rename dialog
+  const closeRenameDialog = () => {
+    setRenameDialogOpen(false);
+    setRecordingToRename(null);
+    setNewRecordingName('');
+    setRenameError(null);
+  };
+
+  // Function to handle renaming a recording
+  const confirmRenameRecording = async () => {
+    if (recordingToRename === null || !newRecordingName.trim()) return;
+    
+    setRenameInProgress(true);
+    setRenameError(null);
+    
+    try {
+      const success = await apiRenameRecording(recordingToRename, newRecordingName);
+      if (success) {
+        // Update recording in state
+        setRecordings(prev => prev.map(rec => {
+          if (rec.id === recordingToRename) {
+            // Get original extension
+            const ext = rec.file_name.split('.').pop() || 'wav';
+            // Create new filename with same extension
+            const newFileName = newRecordingName.trim().endsWith(`.${ext}`) 
+              ? newRecordingName.trim()
+              : `${newRecordingName.trim()}.${ext}`;
+            
+            return {
+              ...rec,
+              file_name: newFileName
+            };
+          }
+          return rec;
+        }));
+        
+        setRenameDialogOpen(false);
+        setRecordingToRename(null);
+        setNewRecordingName('');
+      } else {
+        setRenameError("Failed to rename recording");
+      }
+    } catch (err) {
+      console.error(err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setRenameError(`Failed to rename: ${errorMessage}`);
+    } finally {
+      setRenameInProgress(false);
+    }
+  };
+
   return (
     <Paper sx={{ p: 3, borderRadius: 2, bgcolor: 'rgba(10, 25, 41, 0.7)' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -1344,14 +1425,30 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
           {recordings.map((recording, index) => (
             <Box key={recording.id}>
               <ListItem
+                sx={{
+                  px: { xs: 1, sm: 2 },
+                  py: { xs: 1, sm: 1.5 },
+                  flexDirection: { xs: 'column', sm: 'row' },
+                  alignItems: { xs: 'flex-start', sm: 'center' }
+                }}
                 secondaryAction={
-                  <Box sx={{ display: 'flex', gap: { xs: 0.5, sm: 1 } }}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    gap: { xs: 0.5, sm: 0.75 },
+                    position: { xs: 'static', sm: 'absolute' },
+                    right: { xs: 'auto', sm: 16 },
+                    mt: { xs: 1, sm: 0 },
+                    width: { xs: '100%', sm: 'auto' },
+                    justifyContent: { xs: 'flex-end', sm: 'flex-end' }
+                  }}>
                     <IconButton 
                       size="small" 
                       onClick={() => playRecording(recording.id, recording.public_url)}
                       color={playingId === recording.id ? 'primary' : 'default'}
                       sx={{ 
-                        p: { xs: 0.5, sm: 1 },
+                        p: { xs: 0.5, sm: 0.75 },
+                        minWidth: 32,
+                        minHeight: 32,
                         backgroundColor: playingId === recording.id ? alpha('#7C3AED', 0.1) : 'transparent'
                       }}
                     >
@@ -1361,7 +1458,7 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
                     <IconButton 
                       size="small" 
                       onClick={() => downloadRecording(recording)}
-                      sx={{ p: { xs: 0.5, sm: 1 } }}
+                      sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
                     >
                       <DownloadIcon fontSize="small" />
                     </IconButton>
@@ -1373,7 +1470,7 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
                           onClick={() => analyzeRecording(recording)}
                           color="secondary"
                           disabled={analyzingRecordingId === recording.id}
-                          sx={{ p: { xs: 0.5, sm: 1 } }}
+                          sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
                         >
                           {analyzingRecordingId === recording.id ? (
                             <CircularProgress size={16} color="secondary" />
@@ -1386,9 +1483,17 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
                     
                     <IconButton 
                       size="small" 
+                      onClick={() => openRenameDialog(recording.id)}
+                      sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    
+                    <IconButton 
+                      size="small" 
                       onClick={() => openDeleteConfirmation(recording.id)}
                       color="error"
-                      sx={{ p: { xs: 0.5, sm: 1 } }}
+                      sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
                     >
                       <DeleteIcon fontSize="small" />
                     </IconButton>
@@ -1397,9 +1502,23 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
               >
                 <ListItemText
                   primary={
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography variant="body1">
-                        {recording.file_name.replace(/_/g, ' ').replace('.wav', '').replace(/recording/i, 'Recording')}
+                    <Box sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 1,
+                      width: { xs: '100%', sm: 'calc(100% - 200px)' }, // Reserve space for buttons on desktop
+                      pr: { xs: 0, sm: 2 }
+                    }}>
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          overflow: 'hidden', 
+                          textOverflow: 'ellipsis', 
+                          whiteSpace: 'nowrap',
+                          fontSize: { xs: '0.9rem', sm: '1rem' }
+                        }}
+                      >
+                        {recording.file_name.replace(/_/g, ' ').replace(/\.(wav|mp3|webm)$/i, '').replace(/recording/i, 'Recording')}
                       </Typography>
                       {recording.public_url.startsWith('blob:') && (
                         <Chip 
@@ -1409,18 +1528,30 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
                           sx={{ 
                             height: 18, 
                             fontSize: '0.65rem',
-                            '& .MuiChip-label': { px: 0.8 }
+                            '& .MuiChip-label': { px: 0.8 },
+                            flexShrink: 0
                           }} 
                         />
                       )}
                     </Box>
                   }
                   secondary={
-                    <>
+                    <Typography 
+                      variant="body2" 
+                      color="text.secondary" 
+                      sx={{ 
+                        fontSize: { xs: '0.8rem', sm: '0.875rem' },
+                        mt: 0.5
+                      }}
+                    >
                       {formatDate(recording.recorded_at)} • {formatDuration(recording.duration)}
-                    </>
+                    </Typography>
                   }
-                  sx={{ ml: 1 }}
+                  sx={{ 
+                    ml: { xs: 0, sm: 1 },
+                    width: '100%',
+                    overflow: 'hidden'
+                  }}
                 />
               </ListItem>
               {index < recordings.length - 1 && <Divider />}
@@ -1540,6 +1671,109 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
                   Deleting...
                 </>
               ) : 'Delete'}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Rename Dialog */}
+      <Dialog
+        open={renameDialogOpen}
+        onClose={!renameInProgress ? closeRenameDialog : undefined}
+        aria-labelledby="rename-dialog-title"
+        aria-describedby="rename-dialog-description"
+        PaperProps={{
+          sx: {
+            bgcolor: '#1E293B',
+            backgroundImage: 'none',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '16px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            maxWidth: { xs: '90%', sm: '450px' }
+          }
+        }}
+      >
+        <DialogTitle id="rename-dialog-title" sx={{ pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          {renameError ? (
+            <>
+              <ErrorOutlineIcon color="error" sx={{ fontSize: { xs: 20, sm: 24 } }} />
+              Error
+            </>
+          ) : (
+            <>
+              <EditIcon sx={{ fontSize: { xs: 20, sm: 24 } }} />
+              Rename Recording
+            </>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          {renameError ? (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="body1" color="error" sx={{ mb: 2 }}>
+                {renameError}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Please try again or check your network connection.
+              </Typography>
+            </Box>
+          ) : (
+            <Box>
+              <DialogContentText id="rename-dialog-description" sx={{ color: 'text.secondary', mb: 2 }}>
+                Enter a new name for "{getRecordingName(recordingToRename || 0)}":
+              </DialogContentText>
+              <TextField
+                autoFocus
+                fullWidth
+                value={newRecordingName}
+                onChange={(e) => setNewRecordingName(e.target.value)}
+                label="Recording Name"
+                variant="outlined"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    bgcolor: alpha('#fff', 0.05),
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: alpha('#fff', 0.3)
+                    }
+                  }
+                }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={closeRenameDialog} 
+            color="primary"
+            sx={{ 
+              borderRadius: '12px',
+              px: { xs: 2, md: 3 },
+              width: { xs: '100%', sm: 'auto' }
+            }}
+            disabled={renameInProgress}
+          >
+            {renameError ? 'Close' : 'Cancel'}
+          </Button>
+          {!renameError && (
+            <Button 
+              onClick={confirmRenameRecording} 
+              color="primary" 
+              variant="contained"
+              autoFocus
+              disabled={renameInProgress || !newRecordingName.trim()}
+              sx={{ 
+                borderRadius: '12px',
+                background: 'linear-gradient(90deg, #0ea5e9 0%, #38bdf8 100%)',
+                px: { xs: 2, md: 3 },
+                width: { xs: '100%', sm: 'auto' }
+              }}
+            >
+              {renameInProgress ? (
+                <>
+                  <CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />
+                  Renaming...
+                </>
+              ) : 'Rename'}
             </Button>
           )}
         </DialogActions>
