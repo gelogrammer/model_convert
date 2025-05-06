@@ -17,14 +17,14 @@ import time
 app = Flask(__name__)
 
 # Configure CORS for Render deployment
-# Allow any Render domains (*.onrender.com) and local development
-CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"], supports_credentials=True)
+# Allow any Render domains (*.onrender.com) and local development and Cloudflare pages
+CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", "https://model-convert.pages.dev", "https://*.pages.dev"], supports_credentials=True)
 
 # Configure Socket.IO with CORS for Render
 # Use threading mode which is the default and works with standard worker
 socketio = SocketIO(
     app, 
-    cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"]
+    cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", "https://model-convert.pages.dev", "https://*.pages.dev"]
 )
 
 # Initialize model services to None - they'll be loaded on demand
@@ -313,6 +313,7 @@ def proxy_huggingface():
                 print("Using transformers pipeline for emotion classification")
                 
                 # Use the specific model requested by the user
+                from transformers import pipeline
                 classifier = pipeline(
                     "audio-classification", 
                     model="firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3",
