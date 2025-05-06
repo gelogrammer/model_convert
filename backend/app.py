@@ -43,7 +43,7 @@ def after_request(response):
 # Use threading mode which is the default and works with standard worker
 socketio = SocketIO(
     app, 
-    cors_allowed_origins=["*"]
+    cors_allowed_origins=["*", "https://f0d079c7.model-convert.pages.dev"]
 )
 
 # Initialize model services to None - they'll be loaded on demand
