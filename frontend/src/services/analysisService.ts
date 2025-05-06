@@ -9,6 +9,7 @@ import {
   TEMPO_CATEGORIES,
   PRONUNCIATION_CATEGORIES
 } from './asrService';
+import { silentFetch } from './apiConfig';
 
 // Hidden implementation for using Hugging Face model
 // This is encapsulated in the service to prevent exposure
@@ -17,31 +18,6 @@ import {
 let huggingFaceApiAvailable = true;
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
-
-// Get the API URL from environment variables
-export const getApiUrl = () => {
-  // Check both environment variable names to ensure compatibility
-  return import.meta.env.VITE_API_URL || 
-         import.meta.env.VITE_BACKEND_URL || 
-         (window as any).__env?.VITE_API_URL ||
-         (window as any).__env?.VITE_BACKEND_URL ||
-         'https://name-model-convert-backend.onrender.com';
-};
-
-// Silent fetch utility that doesn't output to console
-const silentFetch = async (url: string, options: RequestInit): Promise<Response | null> => {
-  try {
-    // Ensure the URL starts with the API base URL if it's a relative path
-    const apiUrl = getApiUrl();
-    const fullUrl = url.startsWith('/') ? `${apiUrl}${url}` : url;
-    
-    // Use the original window.fetch but catch and handle any errors silently
-    return await fetch(fullUrl, options);
-  } catch (error) {
-    // Return null instead of throwing or logging to console
-    return null;
-  }
-};
 
 // Speech metrics tracking container
 export interface SpeechMetricsContainer {

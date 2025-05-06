@@ -4,7 +4,7 @@
  */
 
 import { convertToWav } from './audioService';
-import { getApiUrl } from './analysisService';
+import { getApiUrl } from './apiConfig';
 
 // Metrics storage for tracking speech patterns over time
 interface SpeechMetrics {
