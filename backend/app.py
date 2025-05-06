@@ -8,7 +8,6 @@ import io
 import base64
 import numpy as np
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import requests
 import time
@@ -22,24 +21,23 @@ def after_request(response):
     # Get the origin from the request headers
     origin = request.headers.get('Origin')
     
+    # Remove any existing Access-Control-Allow-Origin headers to prevent duplicates
+    if 'Access-Control-Allow-Origin' in response.headers:
+        del response.headers['Access-Control-Allow-Origin']
+    
     # If origin is in the allowed origins, set it specifically
     if origin:
-        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers['Access-Control-Allow-Origin'] = origin
     else:
         # Fallback to wildcard only if no origin is specified
-        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers['Access-Control-Allow-Origin'] = '*'
         
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    # Set other CORS headers
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    
     return response
-
-# Configure CORS for Render deployment with specific origins approach
-CORS(app, 
-     origins=["*"],
-     supports_credentials=True,
-     allow_headers=["*"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     expose_headers=["Content-Type", "Authorization"])
 
 # Configure Socket.IO with CORS for Render
 # Use threading mode which is the default and works with standard worker
