@@ -21,33 +21,31 @@ def after_request(response):
     # Get the origin from the request headers
     origin = request.headers.get('Origin')
     
-    # Define allowed origins explicitly
-    allowed_origins = ['https://f0d079c7.model-convert.pages.dev', 'http://localhost:3000']
+    # Debug output
+    print(f"Handling request from origin: {origin}")
     
-    # Remove any existing Access-Control-Allow-Origin headers to prevent duplicates
-    if 'Access-Control-Allow-Origin' in response.headers:
-        del response.headers['Access-Control-Allow-Origin']
-    
-    # If origin is in the allowed origins, set it specifically
-    if origin and origin in allowed_origins:
+    # Always allow the frontend origin
+    if origin:
         response.headers['Access-Control-Allow-Origin'] = origin
     else:
-        # Fallback to wildcard only if no origin is specified
         response.headers['Access-Control-Allow-Origin'] = '*'
-        
+    
     # Set other CORS headers
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Requested-With'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = '*'
     response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Access-Control-Max-Age'] = '86400'  # 24 hours
+    
+    print(f"Response headers: {dict(response.headers)}")
     
     return response
 
 # Configure Socket.IO with CORS for Render
-# Use threading mode which is the default and works with standard worker
 socketio = SocketIO(
     app, 
-    cors_allowed_origins=["https://f0d079c7.model-convert.pages.dev", "http://localhost:3000"],
-    async_mode='threading'
+    cors_allowed_origins="*",
+    logger=True,
+    engineio_logger=True
 )
 
 # Initialize model services to None - they'll be loaded on demand
@@ -641,6 +639,14 @@ def handle_audio_stream(data):
     except Exception as e:
         print(f"Error processing streaming audio: {e}")
         emit('error', {'message': str(e)})
+
+# Add a universal OPTIONS route handler
+@app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
+@app.route('/<path:path>', methods=['OPTIONS'])
+def options_handler(path):
+    """Handler for all OPTIONS requests"""
+    print(f"Handling OPTIONS request for path: /{path}")
+    return '', 204
 
 if __name__ == '__main__':
     # Create models directory if it doesn't exist
