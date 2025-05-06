@@ -21,19 +21,22 @@ def after_request(response):
     # Get the origin from the request headers
     origin = request.headers.get('Origin')
     
+    # Define allowed origins explicitly
+    allowed_origins = ['https://f0d079c7.model-convert.pages.dev', 'http://localhost:3000']
+    
     # Remove any existing Access-Control-Allow-Origin headers to prevent duplicates
     if 'Access-Control-Allow-Origin' in response.headers:
         del response.headers['Access-Control-Allow-Origin']
     
     # If origin is in the allowed origins, set it specifically
-    if origin:
+    if origin and origin in allowed_origins:
         response.headers['Access-Control-Allow-Origin'] = origin
     else:
         # Fallback to wildcard only if no origin is specified
         response.headers['Access-Control-Allow-Origin'] = '*'
         
     # Set other CORS headers
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Requested-With'
     response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     
@@ -43,7 +46,8 @@ def after_request(response):
 # Use threading mode which is the default and works with standard worker
 socketio = SocketIO(
     app, 
-    cors_allowed_origins=["*", "https://f0d079c7.model-convert.pages.dev"]
+    cors_allowed_origins=["https://f0d079c7.model-convert.pages.dev", "http://localhost:3000"],
+    async_mode='threading'
 )
 
 # Initialize model services to None - they'll be loaded on demand
