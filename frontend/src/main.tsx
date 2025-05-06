@@ -5,6 +5,11 @@ import CssBaseline from '@mui/material/CssBaseline'
 import './index.css'
 import App from './App.tsx'
 
+// Register Chart.js globally to fix "line is not a registered controller" error
+import { Chart } from 'chart.js'
+import { LineController } from 'chart.js'
+Chart.register(LineController)
+
 // Silence specific console messages
 import { setupConsoleSilencing } from './services/silenceConsole'
 setupConsoleSilencing()

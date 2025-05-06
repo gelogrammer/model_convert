@@ -208,16 +208,16 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({
     try {
       console.log('Attempting to save recording...');
       let attempts = 0;
-      let success = false;
+      let success: { success: boolean; recordingId?: string | number } = { success: false };
       const maxAttempts = 3;
       
-      while (!success && attempts < maxAttempts) {
+      while (!success.success && attempts < maxAttempts) {
         attempts++;
         try {
           console.log(`Save attempt ${attempts}/${maxAttempts}`);
           success = await saveRecordingToDatabase({});
           
-          if (success) {
+          if (success.success) {
             console.log('Successfully saved recording');
             break;
           } else {
@@ -233,7 +233,7 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({
         }
       }
       
-      if (!success) {
+      if (!success.success) {
         console.error(`Failed to save recording after ${maxAttempts} attempts`);
         setSaveError(true);
       }

@@ -65,7 +65,9 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
 const testBackendConnectivity = async (): Promise<boolean> => {
   try {
     // Get the API URL from environment variables
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+    const apiUrl = import.meta.env.VITE_API_URL || 
+                  import.meta.env.VITE_BACKEND_URL || 
+                  'http://localhost:5001';
     
     // Use the health endpoint to check if backend is up
     const controller = new AbortController();
@@ -89,7 +91,9 @@ const testBackendConnectivity = async (): Promise<boolean> => {
  */
 const connectSocket = (handlers: WebSocketHandlers) => {
   // Get the API URL from environment variables
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+  const apiUrl = import.meta.env.VITE_API_URL || 
+                import.meta.env.VITE_BACKEND_URL || 
+                'http://localhost:5001';
   
   console.log(`Connecting to WebSocket server at ${apiUrl}`);
   

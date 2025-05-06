@@ -21,7 +21,8 @@ app = Flask(__name__)
 CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", 
                   "https://model-convert.pages.dev", "https://*.pages.dev", 
                   "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
-                  "https://*.model-convert.pages.dev"], 
+                  "https://*.model-convert.pages.dev",
+                  "https://model-convert-backend.onrender.com"], 
      supports_credentials=True)
 
 # Configure Socket.IO with CORS for Render
@@ -31,7 +32,8 @@ socketio = SocketIO(
     cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", 
                          "https://model-convert.pages.dev", "https://*.pages.dev", 
                          "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
-                         "https://*.model-convert.pages.dev"]
+                         "https://*.model-convert.pages.dev",
+                         "https://model-convert-backend.onrender.com"]
 )
 
 # Initialize model services to None - they'll be loaded on demand
@@ -128,26 +130,42 @@ def initialize_models_if_needed():
         print(f"Error initializing models: {e}")
         return False
 
-@app.route('/api/health', methods=['GET'])
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health_check():
     """Health check endpoint"""
+    # Handle OPTIONS request (CORS preflight)
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+        
     return jsonify({
         "status": "ok", 
         "message": "Speech Emotion Recognition API is running",
         "model_status": "loaded" if MODELS_LOADED else "not_loaded"
-    })
+    }), 200
 
-@app.route('/api/initialize', methods=['POST'])
+@app.route('/api/initialize', methods=['GET', 'POST', 'OPTIONS'])
 def initialize_model():
     """Initialize the model with the provided path"""
     if not import_model_modules():
         return jsonify({"status": "error", "message": "Could not import model modules"}), 500
         
+    # Handle OPTIONS request (CORS preflight)
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+        
     global model_service, audio_processor, asr_service
     
-    data = request.json
-    ser_model_path = data.get('model_path', 'models/SER.h5')
-    asr_model_path = data.get('asr_model_path', 'models/ASR.pth')
+    # For GET requests, use default paths
+    if request.method == 'GET':
+        ser_model_path = 'models/SER.h5'
+        asr_model_path = 'models/ASR.pth'
+    else:
+        # For POST requests, get paths from JSON payload
+        data = request.json
+        ser_model_path = data.get('model_path', 'models/SER.h5') if data else 'models/SER.h5'
+        asr_model_path = data.get('asr_model_path', 'models/ASR.pth') if data else 'models/ASR.pth'
     
     try:
         # Initialize SER model service
