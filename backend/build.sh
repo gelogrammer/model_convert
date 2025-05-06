@@ -28,7 +28,7 @@ if [ ! -s models/ASR.pth ]; then
 fi
 
 echo "Installing specific packages needed for the web server..."
-pip install gunicorn==20.1.0
+pip install gunicorn==20.1.0 werkzeug==2.0.3
 
 echo "Installing requirements..."
 pip install -r requirements.txt
@@ -38,6 +38,10 @@ if ! command -v gunicorn &> /dev/null; then
     echo "Gunicorn not found, installing directly..."
     pip install gunicorn==20.1.0
 fi
+
+# Double check Werkzeug version to ensure compatibility
+echo "Checking Werkzeug version..."
+pip list | grep Werkzeug
 
 echo "Checking installed packages..."
 pip list | grep -E "gunicorn|flask-socketio|python-socketio"
