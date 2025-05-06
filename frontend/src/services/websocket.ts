@@ -64,26 +64,52 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
  */
 const testBackendConnectivity = async (): Promise<boolean> => {
   try {
-    // Get the API URL from environment variables
-    const apiUrl = import.meta.env.VITE_API_URL || 
-                  import.meta.env.VITE_BACKEND_URL || 
-                  (window as any).__env?.VITE_API_URL ||
-                  (window as any).__env?.VITE_BACKEND_URL ||
-                  'https://name-model-convert-backend.onrender.com';
+    // For Cloudflare Pages deployment, use direct backend URL for health check
+    const isCloudflarePages = window.location.hostname.includes('pages.dev');
+    
+    // Always use direct backend URL for health check
+    const apiUrl = 'https://name-model-convert-backend.onrender.com';
+    
+    console.log(`Testing backend connectivity at ${apiUrl}/api/health`);
     
     // Use the health endpoint to check if backend is up
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // Increase timeout
     
-    const response = await fetch(`${apiUrl}/api/health`, {
-      method: 'GET',
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    return response.ok;
+    try {
+      const response = await fetch(`${apiUrl}/api/health`, {
+        method: 'GET',
+        mode: 'cors',
+        headers: {
+          'Accept': 'application/json',
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      console.log(`Backend health check response: ${response.status} ${response.statusText}`);
+      
+      // If on Cloudflare Pages, skip the health check verification and connect anyway
+      if (isCloudflarePages) {
+        console.log("Running on Cloudflare Pages - will attempt socket connection regardless of health check");
+        return true;
+      }
+      
+      return response.ok;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      console.error('Backend health check fetch error:', fetchError);
+      
+      // If on Cloudflare Pages, attempt connection via proxy even if health check fails
+      if (isCloudflarePages) {
+        console.log("Running on Cloudflare Pages - will attempt socket connection via proxy despite health check failure");
+        return true;
+      }
+      
+      return false;
+    }
   } catch (error) {
-    console.warn('Backend connectivity test failed:', error);
+    console.warn('Backend connectivity test error:', error);
     return false;
   }
 };
@@ -92,23 +118,60 @@ const testBackendConnectivity = async (): Promise<boolean> => {
  * Connect to WebSocket server
  */
 const connectSocket = (handlers: WebSocketHandlers) => {
-  // Get the API URL from environment variables
-  const apiUrl = import.meta.env.VITE_API_URL || 
-                import.meta.env.VITE_BACKEND_URL || 
-                (window as any).__env?.VITE_API_URL ||
-                (window as any).__env?.VITE_BACKEND_URL ||
-                'https://name-model-convert-backend.onrender.com';
+  // For Cloudflare Pages deployment, use the local proxy to avoid CORS issues
+  const isCloudflarePages = window.location.hostname.includes('pages.dev');
   
-  console.log(`Connecting to WebSocket server at ${apiUrl}`);
+  // Get the API URL - for Cloudflare, use the local proxy
+  const apiUrl = isCloudflarePages 
+    ? window.location.origin  // Use the same origin (our Functions will proxy to backend)
+    : (
+        import.meta.env.VITE_API_URL || 
+        import.meta.env.VITE_BACKEND_URL || 
+        (window as any).__env?.VITE_API_URL ||
+        (window as any).__env?.VITE_BACKEND_URL ||
+        'https://name-model-convert-backend.onrender.com'
+      );
   
-  socket = io(apiUrl, {
-    transports: ['websocket', 'polling'], // Add polling as fallback
+  console.log(`Connecting to WebSocket server at ${apiUrl} (${isCloudflarePages ? 'via proxy' : 'direct'})`);
+  
+  // Configure Socket.IO differently for Cloudflare Pages
+  const socketOptions = {
+    transports: ['polling'], // Use only polling - more reliable through Cloudflare
     reconnection: true,
-    reconnectionAttempts: 10,
+    reconnectionAttempts: 20,
     reconnectionDelay: 1000,
-    timeout: 10000, // Increase timeout
+    reconnectionDelayMax: 5000,
+    randomizationFactor: 0.5,
+    timeout: 60000, // Long timeout for polling
     forceNew: true,
-    path: '/socket.io/'
+    path: '/socket.io/',
+    autoConnect: true
+  };
+  
+  console.log('Socket.IO configuration:', socketOptions);
+  
+  // Close any existing connections
+  if (socket) {
+    console.log('Closing existing Socket.IO connection');
+    socket.close();
+    socket = null;
+  }
+  
+  // Create new socket connection
+  socket = io(apiUrl, socketOptions);
+  
+  // Log more detailed connection information
+  socket.io.on("reconnect_attempt", () => {
+    console.log("Attempting to reconnect to WebSocket...");
+  });
+
+  socket.io.on("reconnect_error", (error) => {
+    console.error("Error while reconnecting to WebSocket:", error);
+  });
+
+  socket.io.on("reconnect_failed", () => {
+    console.error("Failed to reconnect to WebSocket after all attempts");
+    handlers.onError?.(new Error("Failed to reconnect to backend after all attempts"));
   });
 
   // Setup event handlers

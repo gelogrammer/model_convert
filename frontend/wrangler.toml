@@ -7,8 +7,14 @@ command = "npm run build"
 output_directory = "dist"
 pages_build_output_dir = "dist"
 
-[env.production]
-vars = { VITE_BACKEND_URL = "https://name-model-convert-backend.onrender.com", VITE_API_URL = "https://name-model-convert-backend.onrender.com" }
-
+# WebSocket connections allowed via automatic upgrading
 [site]
-bucket = "./dist" 
+bucket = "./dist"
+
+# Define the worker for handling Socket.IO connections
+[[functions]]
+pattern = "/socket.io/*"
+script = "worker.js"
+
+[env.production]
+vars = { VITE_BACKEND_URL = "https://name-model-convert-backend.onrender.com", VITE_API_URL = "https://name-model-convert-backend.onrender.com" } 
