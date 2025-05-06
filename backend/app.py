@@ -28,10 +28,17 @@ from asr_service import ASRService
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
 
-# Configure Socket.IO
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Configure CORS for Render deployment
+# Allow any Render domains (*.onrender.com) and local development
+CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"], supports_credentials=True)
+
+# Configure Socket.IO with CORS for Render
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*"], 
+    async_mode='eventlet'
+)
 
 # Initialize model services
 model_service = None

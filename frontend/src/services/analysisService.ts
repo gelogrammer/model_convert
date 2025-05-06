@@ -18,11 +18,18 @@ let huggingFaceApiAvailable = true;
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
 
+// Get the API URL from environment variables
+const getApiUrl = () => import.meta.env.VITE_API_URL || 'http://localhost:5001';
+
 // Silent fetch utility that doesn't output to console
 const silentFetch = async (url: string, options: RequestInit): Promise<Response | null> => {
   try {
+    // Ensure the URL starts with the API base URL if it's a relative path
+    const apiUrl = getApiUrl();
+    const fullUrl = url.startsWith('/') ? `${apiUrl}${url}` : url;
+    
     // Use the original window.fetch but catch and handle any errors silently
-    return await fetch(url, options);
+    return await fetch(fullUrl, options);
   } catch (error) {
     // Return null instead of throwing or logging to console
     return null;

@@ -64,11 +64,14 @@ export const initializeWebSocket = (handlers: WebSocketHandlers) => {
  */
 const testBackendConnectivity = async (): Promise<boolean> => {
   try {
+    // Get the API URL from environment variables
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+    
     // Use the health endpoint to check if backend is up
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
     
-    const response = await fetch('/api/health', {
+    const response = await fetch(`${apiUrl}/api/health`, {
       method: 'GET',
       signal: controller.signal
     });
@@ -85,12 +88,12 @@ const testBackendConnectivity = async (): Promise<boolean> => {
  * Connect to WebSocket server
  */
 const connectSocket = (handlers: WebSocketHandlers) => {
-  const serverUrl = window.location.hostname === 'localhost' ? 
-    'http://localhost:5001' : window.location.origin;
+  // Get the API URL from environment variables
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
   
-  console.log(`Connecting to WebSocket server at ${serverUrl}`);
+  console.log(`Connecting to WebSocket server at ${apiUrl}`);
   
-  socket = io(serverUrl, {
+  socket = io(apiUrl, {
     transports: ['websocket', 'polling'], // Add polling as fallback
     reconnection: true,
     reconnectionAttempts: 10,
