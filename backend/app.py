@@ -16,28 +16,27 @@ import time
 # Initialize Flask app
 app = Flask(__name__)
 
+# Set up proper CORS handling for all routes
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
 # Configure CORS for Render deployment
 # Allow any Render domains (*.onrender.com) and local development and Cloudflare pages
-CORS(app, origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", 
-                  "https://model-convert.pages.dev", "https://*.pages.dev", 
-                  "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
-                  "https://*.model-convert.pages.dev", "https://61658fdf.model-convert.pages.dev",
-                  "https://32377a35.model-convert.pages.dev",
-                  "https://model-convert-backend.onrender.com",
-                  "https://name-model-convert-backend.onrender.com"], 
-     supports_credentials=True)
+CORS(app, origins=["*"], 
+     supports_credentials=True,
+     allow_headers=["*"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     expose_headers=["Content-Type", "Authorization"])
 
 # Configure Socket.IO with CORS for Render
 # Use threading mode which is the default and works with standard worker
 socketio = SocketIO(
     app, 
-    cors_allowed_origins=["https://*.onrender.com", "http://localhost:*", "https://localhost:*", 
-                         "https://model-convert.pages.dev", "https://*.pages.dev", 
-                         "https://2dad15e1.model-convert.pages.dev", "https://ca32d724.model-convert.pages.dev", 
-                         "https://*.model-convert.pages.dev", "https://61658fdf.model-convert.pages.dev",
-                         "https://32377a35.model-convert.pages.dev",
-                         "https://model-convert-backend.onrender.com",
-                         "https://name-model-convert-backend.onrender.com"]
+    cors_allowed_origins=["*"]
 )
 
 # Initialize model services to None - they'll be loaded on demand
@@ -139,7 +138,7 @@ def health_check():
     """Health check endpoint"""
     # Handle OPTIONS request (CORS preflight)
     if request.method == 'OPTIONS':
-        response = app.make_default_options_response()
+        response = jsonify({"status": "ok"})
         return response
         
     return jsonify({
@@ -151,13 +150,13 @@ def health_check():
 @app.route('/api/initialize', methods=['GET', 'POST', 'OPTIONS'])
 def initialize_model():
     """Initialize the model with the provided path"""
-    if not import_model_modules():
-        return jsonify({"status": "error", "message": "Could not import model modules"}), 500
-        
     # Handle OPTIONS request (CORS preflight)
     if request.method == 'OPTIONS':
-        response = app.make_default_options_response()
+        response = jsonify({"status": "ok"})
         return response
+        
+    if not import_model_modules():
+        return jsonify({"status": "error", "message": "Could not import model modules"}), 500
         
     global model_service, audio_processor, asr_service
     
@@ -193,9 +192,14 @@ def initialize_model():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/analyze', methods=['POST'])
+@app.route('/api/analyze', methods=['POST', 'OPTIONS'])
 def analyze_audio():
     """Analyze audio data for emotion"""
+    # Handle OPTIONS request (CORS preflight)
+    if request.method == 'OPTIONS':
+        response = jsonify({"status": "ok"})
+        return response
+        
     # Initialize models if not already loaded
     if not MODELS_LOADED and not initialize_models_if_needed():
         return jsonify({
@@ -302,9 +306,14 @@ def analyze_audio():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/proxy/huggingface', methods=['POST'])
+@app.route('/api/proxy/huggingface', methods=['POST', 'OPTIONS'])
 def proxy_huggingface():
     """Proxy requests to Hugging Face to avoid CORS issues"""
+    # Handle OPTIONS request (CORS preflight)
+    if request.method == 'OPTIONS':
+        response = jsonify({"status": "ok"})
+        return response
+        
     try:
         data = request.json
         print("Received proxy request data. Keys:", list(data.keys()))
