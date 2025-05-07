@@ -1073,7 +1073,6 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
         <Box sx={{ 
           display: 'flex', 
           alignItems: 'center',
-          justifyContent: 'space-between',
           mb: 2,
           pb: 1,
           borderBottom: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
@@ -1099,21 +1098,6 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
               )}
             </Box>
           </Box>
-          
-          <Chip
-            label={`Score: ${Math.round(throttledMetrics.overallScore * 100)}`}
-            size="small"
-            sx={{
-              height: 24,
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              borderRadius: '4px',
-              backgroundColor: getScoreColor(throttledMetrics.overallScore),
-              color: 'white',
-              minWidth: 80,
-              flexShrink: 0
-            }}
-          />
         </Box>
       )}
       
@@ -1142,12 +1126,37 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       </Box>
       
       {useASRModel && (
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          my: 2,
+          pb: 1,
+          borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+        }}>
+          <Chip
+            label={`Overall Score: ${Math.round(throttledMetrics.overallScore * 100)}`}
+            size="medium"
+            sx={{
+              height: 32,
+              fontSize: '0.9rem',
+              fontWeight: 700,
+              borderRadius: '4px',
+              backgroundColor: getScoreColor(throttledMetrics.overallScore),
+              color: 'white',
+              minWidth: 120,
+              boxShadow: `0 2px 4px ${alpha(getScoreColor(throttledMetrics.overallScore), 0.4)}`
+            }}
+          />
+        </Box>
+      )}
+      
+      {useASRModel && (
         <Box sx={{ 
           display: 'flex', 
           justifyContent: 'space-between', 
-          mt: 2,
+          mt: 1,
           pt: 1,
-          borderTop: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
           height: LAYOUT.footerHeight,
           width: '100%'
         }}>
