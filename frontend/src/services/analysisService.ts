@@ -19,7 +19,15 @@ let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
 
 // Define the API endpoint path once to make it easier to change if needed
-const ANALYSIS_SERVICE_ENDPOINT = '/api/external/inference';
+const getAnalysisServiceEndpoint = () => {
+  // Get the backend URL from environment variables or use a fallback
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://speech-emotion-recognition-api-t5e8.onrender.com';
+  
+  // Use the environment variable or localhost for local development
+  return window.location.hostname === 'localhost' 
+    ? '/api/external/inference'
+    : `${backendUrl}/api/external/inference`;
+};
 
 // Silent logging function that doesn't output to console
 const silentLog = (_message: string, _data?: any): void => {
@@ -31,8 +39,21 @@ const silentLog = (_message: string, _data?: any): void => {
 // Silent fetch utility that doesn't output to console
 const silentFetch = async (url: string, options: RequestInit): Promise<Response | null> => {
   try {
+    // Add CORS headers to all requests
+    const corsOptions: RequestInit = {
+      ...options,
+      mode: 'cors',
+      credentials: 'omit', // Don't send cookies to avoid CORS issues
+      headers: {
+        ...(options.headers || {}),
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest', // Some servers check for this header
+        'Access-Control-Allow-Origin': '*',
+      }
+    };
+    
     // Use the original window.fetch but catch and handle any errors silently
-    return await fetch(url, options);
+    return await fetch(url, corsOptions);
   } catch (error) {
     // Return null instead of throwing or logging to console
     return null;
@@ -403,18 +424,35 @@ const calculateScoreFromCategory = (
 // Create a function to analyze audio with the backend
 const analyzeAudioWithBackend = async (audioBlob: Blob): Promise<any> => {
   try {
+    // Get the backend URL from environment variables or use a fallback
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://speech-emotion-recognition-api-t5e8.onrender.com';
+    
+    // Use the environment variable or localhost for local development
+    const apiUrl = window.location.hostname === 'localhost' 
+      ? 'http://localhost:5001/api/analyze'
+      : `${backendUrl}/api/analyze`;
+    
+    console.log(`Sending audio analysis request to: ${apiUrl}`);
+    
     // Prepare form data for the backend
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.wav');
     formData.append('confidence_threshold', '0.3');
     
     // Send request to the backend analysis endpoint
-    const response = await silentFetch('/api/analyze', {
+    const response = await silentFetch(apiUrl, {
       method: 'POST',
+      headers: {
+        'Origin': window.location.origin,
+        'Accept': 'application/json'
+      },
+      mode: 'cors',
+      credentials: 'omit',
       body: formData
     });
     
     if (!response || !response.ok) {
+      console.warn(`Backend analysis failed with status: ${response?.status || 'unknown'}`);
       throw new Error(`Backend analysis failed`);
     }
     
@@ -426,6 +464,7 @@ const analyzeAudioWithBackend = async (audioBlob: Blob): Promise<any> => {
     
     return backendResult;
   } catch (error) {
+    console.warn('Using fallback for audio analysis due to error:', error);
     // Return default values if backend analysis fails
     return {
       emotion: 'neutral',
@@ -564,12 +603,20 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       
       while (retryCount <= maxRetries) {
         try {
+          // Get the endpoint URL
+          const endpoint = getAnalysisServiceEndpoint();
+          console.log(`Attempting to call external inference API at ${endpoint}`);
+          
           // Use silentFetch to prevent console errors
-          proxyResponse = await silentFetch(ANALYSIS_SERVICE_ENDPOINT, {
+          proxyResponse = await silentFetch(endpoint, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'Origin': window.location.origin,
+              'Accept': 'application/json'
             },
+            mode: 'cors',
+            credentials: 'omit',
             body: JSON.stringify({
               model: modelIdentifier,
               apiKey: authToken.trim(), // Ensure no whitespace

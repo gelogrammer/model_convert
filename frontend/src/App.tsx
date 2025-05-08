@@ -332,28 +332,92 @@ function App() {
 
         // Initialize model
         try {
-          const response = await fetch('/api/initialize', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model_path: 'models/SER.h5',
-              asr_model_path: 'models/ASR.pth'
-            }),
-          });
-
-          const data = await response.json();
-
-          if (data.status === 'success') {
+          // Get the backend URL from environment variables or use a fallback
+          const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://speech-emotion-recognition-api-t5e8.onrender.com';
+          
+          // Use the environment variable or localhost for local development
+          const apiUrl = window.location.hostname === 'localhost' 
+            ? 'http://localhost:5001/api/initialize'
+            : `${backendUrl}/api/initialize`;
+          
+          console.log('Initializing model using API endpoint:', apiUrl);
+          
+          // Check if this is a Render.com service (which might hibernate)
+          const isRenderService = backendUrl.includes('render.com');
+          const timeoutMs = isRenderService ? 30000 : 8000; // Longer timeout for potentially hibernating services
+          
+          // Show a message if trying to connect to a Render service that might be hibernating
+          if (isRenderService) {
+            setError('Connecting to Render.com service, which may be hibernating. First connection can take up to 30 seconds...');
+          }
+          
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            
+            console.log(`Attempting to initialize model with ${timeoutMs}ms timeout`);
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              mode: 'cors',
+              signal: controller.signal,
+              body: JSON.stringify({
+                model_path: 'models/SER.h5',
+                asr_model_path: 'models/ASR.pth'
+              }),
+            });
+            
+            clearTimeout(timeoutId);
+            
+            // If we get any response (even an error), the server is responsive
+            if (response) {
+              try {
+                const data = await response.json();
+                if (data.status === 'success') {
+                  console.log('Model initialized successfully:', data);
+                  setIsModelInitialized(true);
+                  setError(null); // Clear any error messages since we succeeded
+                } else {
+                  console.warn('Model initialization returned error status:', data);
+                  setError(data.message || 'Failed to initialize model, but will attempt to operate in limited mode');
+                  // Still proceed with the app in fallback mode
+                  setIsModelInitialized(true);
+                }
+              } catch (jsonError) {
+                console.error('Failed to parse API response:', jsonError);
+                // Still proceed with the app in fallback mode
+                setIsModelInitialized(true);
+                setError('Failed to parse server response. App will operate in limited mode.');
+              }
+            } else {
+              throw new Error('No response from initialize endpoint');
+            }
+          } catch (fetchError) {
+            console.error('API fetch error:', fetchError);
+            
+            // Handle timeout specially
+            if (fetchError && typeof fetchError === 'object' && 'name' in fetchError && fetchError.name === 'AbortError') {
+              if (isRenderService) {
+                setError('Connection timed out. If using Render.com, service may be hibernating. Please wait or try again in a minute.');
+              } else {
+                setError('Connection timed out. Please check if the backend server is running.');
+              }
+            } else {
+              setError('Backend server is not available. Application will run in offline mode with limited functionality.');
+            }
+            
+            // For development/fallback, we'll set this to true even if the backend is not available
             setIsModelInitialized(true);
-          } else {
-            setError(data.message || 'Failed to initialize model');
           }
         } catch (error) {
           console.error('API error:', error);
-          // For development, we'll set this to true even if the backend is not available
+          // For development/fallback, we'll set this to true even if the backend is not available
           setIsModelInitialized(true);
+          // Show a generic error
+          setError('An unexpected error occurred. Application will run in offline mode with limited functionality.');
         }
       } catch (err) {
         setError('Failed to connect to server. Make sure the backend is running.');

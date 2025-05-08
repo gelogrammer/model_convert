@@ -1,5 +1,6 @@
 import { getRecordedAudio, getAudioAnalysisResult } from './audioService';
 import { uploadRecording, getRecordings as fetchSupabaseRecordings, deleteRecording as deleteSupabaseRecording, saveAudioAnalysis, testSupabaseConnection, renameRecording as renameSupabaseRecording } from './supabaseService';
+import { isSupabaseStorageUrl, createCorsProxyUrl, corsAwareFetch } from '../lib/corsProxy';
 
 // Interface for recording data
 export interface Recording {
@@ -676,12 +677,24 @@ export const fetchRecordings = async (): Promise<Recording[]> => {
         if (fixedUrl.startsWith('http')) {
           try {
             // Try to check if the URL is accessible
-            const response = await fetch(fixedUrl, { method: 'HEAD' }).catch(() => null);
-            if (!response) {
-              console.warn('Recording URL not accessible:', fixedUrl);
+            if (isSupabaseStorageUrl(fixedUrl)) {
+              const proxyUrl = createCorsProxyUrl(fixedUrl);
+              console.log('Using CORS proxy URL for Supabase storage:', proxyUrl);
+              fixedUrl = proxyUrl; // Use the proxy URL going forward
+            } else {
+              // For non-Supabase URLs, just check access
+              try {
+                const response = await corsAwareFetch(fixedUrl, { method: 'HEAD' }).catch(() => null);
+                if (!response) {
+                  console.warn('Recording URL not accessible:', fixedUrl);
+                }
+              } catch (error) {
+                console.warn('Error checking recording URL:', error);
+                // Continue with original URL - we'll handle playback errors later
+              }
             }
           } catch (error) {
-            console.warn('Error checking recording URL:', error);
+            console.warn('Error preparing recording URL:', error);
             // Continue with original URL - we'll handle playback errors later
           }
         }
@@ -748,37 +761,80 @@ export const convertAudioForBrowserPlayback = async (audioUrl: string): Promise<
     
     console.log('Converting audio for browser playback:', audioUrl);
     
-    // Add cache-busting parameter to avoid caching issues with Supabase URLs
+    // Check if it's a Supabase URL
+    if (isSupabaseStorageUrl(audioUrl)) {
+      console.log('Using CORS proxy for Supabase URL');
+      const proxyUrl = createCorsProxyUrl(audioUrl);
+      
+      try {
+        // Create an audio element to check if the URL is accessible
+        const audio = document.createElement('audio');
+        audio.crossOrigin = 'anonymous';
+        audio.src = proxyUrl;
+        
+        // Return a promise that resolves when the audio can be played or errors
+        return new Promise((resolve) => {
+          const timeoutId = setTimeout(() => {
+            console.log('Timeout waiting for audio load, using direct URL');
+            resolve(proxyUrl);
+          }, 3000);
+          
+          audio.oncanplaythrough = () => {
+            clearTimeout(timeoutId);
+            console.log('Audio can be played, using direct URL');
+            resolve(proxyUrl);
+          };
+          
+          audio.onerror = () => {
+            clearTimeout(timeoutId);
+            console.error('Error loading audio with proxy URL, falling back to blob URL');
+            
+            // Try to create a blob URL by fetching the file
+            corsAwareFetch(proxyUrl)
+              .then(response => {
+                if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+                return response.blob();
+              })
+              .then(blob => {
+                const blobUrl = URL.createObjectURL(blob);
+                console.log('Created blob URL from proxy URL');
+                resolve(blobUrl);
+              })
+              .catch(error => {
+                console.error('Failed to create blob URL:', error);
+                // As last resort, just return the proxy URL
+                resolve(proxyUrl);
+              });
+          };
+          
+          // Start loading the audio
+          audio.load();
+        });
+      } catch (error) {
+        console.error('Error with CORS proxy approach:', error);
+        return proxyUrl; // Return the proxy URL directly as fallback
+      }
+    }
+    
+    // For non-Supabase URLs, use the original method
+    // Add cache-busting parameter to avoid caching issues
     const urlWithNoCacheParam = audioUrl.includes('?') 
       ? `${audioUrl}&_nocache=${Date.now()}` 
       : `${audioUrl}?_nocache=${Date.now()}`;
     
     // Fetch the audio file with appropriate headers for CORS
     try {
-      const response = await fetch(urlWithNoCacheParam, {
-        method: 'GET',
-        headers: {
-          'Range': 'bytes=0-', // Request range to help with partial content responses
-          'Cache-Control': 'no-cache', // Avoid caching issues
-          'Pragma': 'no-cache',
-        },
-        mode: 'cors', // Use CORS mode to handle cross-origin requests
-        credentials: 'omit', // Don't send cookies to reduce CORS issues
-      });
+      const response = await corsAwareFetch(urlWithNoCacheParam);
       
       if (!response.ok) {
         console.error(`Failed to fetch audio: ${response.status} ${response.statusText}`);
         
-        // Try alternative fetch approach without Range header, which can cause issues
-        console.log('Trying alternative fetch approach without Range header');
-        const altResponse = await fetch(urlWithNoCacheParam, {
-          method: 'GET',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-          },
-          mode: 'cors',
-          credentials: 'omit',
+        // Try alternative fetch approach without Range header
+        console.log('Trying alternative fetch approach');
+        const altResponse = await corsAwareFetch(urlWithNoCacheParam, {
+          headers: { 
+            'Range': undefined as any // Remove Range header
+          }
         });
         
         if (!altResponse.ok) {

@@ -9,7 +9,8 @@ import {
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  LineController
 } from 'chart.js';
 import { TEMPO_CATEGORIES } from '../services/asrService';
 
@@ -19,6 +20,7 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
+  LineController,
   Title,
   Tooltip,
   Legend

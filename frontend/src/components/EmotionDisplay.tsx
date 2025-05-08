@@ -12,7 +12,9 @@ import {
   Legend,
   PointElement,
   LineElement,
-  ChartData
+  ChartData,
+  BarController,
+  LineController
 } from 'chart.js';
 
 // Register Chart.js components
@@ -22,6 +24,8 @@ ChartJS.register(
   BarElement,
   PointElement,
   LineElement,
+  BarController,
+  LineController,
   Title,
   Tooltip,
   Legend
