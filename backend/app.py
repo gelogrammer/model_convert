@@ -31,12 +31,37 @@ from external_inference_handler import inference_processor as ext_processor
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS with proper settings to allow Cloudflare Pages domains
+CORS(app, resources={r"/*": {
+    "origins": [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "https://*.model-convert-direct.pages.dev",
+        "https://model-convert-direct.pages.dev",
+        "https://*.pages.dev",
+        "https://*.vercel.app"
+    ],
+    "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+    "expose_headers": ["Content-Type"],
+    "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    "supports_credentials": True,
+    "max_age": 86400  # Cache preflight requests for 24 hours
+}})
 
 # Configure Socket.IO with more permissive CORS settings and longer ping timeout
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173", 
+        "https://*.model-convert-direct.pages.dev",
+        "https://model-convert-direct.pages.dev",
+        "https://*.pages.dev",
+        "https://*.vercel.app"
+    ],
     async_mode='eventlet',
     ping_timeout=60,
     ping_interval=25,
@@ -51,6 +76,36 @@ asr_service = None
 
 # Default confidence threshold for dominant emotion detection
 DEFAULT_CONFIDENCE_THRESHOLD = 0.35  # Adjusted from 0.4 to 0.35 for better sensitivity
+
+# Add CORS headers to all responses
+@app.after_request
+def add_cors_headers(response):
+    # Get the origin from the request
+    origin = request.headers.get('Origin', '')
+    
+    # Check if the origin is from our allowed domains
+    allowed_origins = [
+        "http://localhost:5173",
+        "http://localhost:3000", 
+        "http://127.0.0.1:5173"
+    ]
+    
+    # Also allow Cloudflare Pages domains
+    if origin.endswith('.model-convert-direct.pages.dev') or origin.endswith('.pages.dev') or origin.endswith('.vercel.app'):
+        allowed_origins.append(origin)
+    
+    # Set CORS headers if origin is allowed
+    if origin in allowed_origins:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Max-Age', '86400')
+    else:
+        # If not a recognized origin but we want to be permissive, allow all
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        
+    return response
 
 # Auto-initialize the models on startup
 def initialize_on_startup():
@@ -90,14 +145,25 @@ def initialize_on_startup():
 # Run initialization
 initialize_on_startup()
 
-@app.route('/api/health', methods=['GET'])
+# Add OPTIONS method handler for all routes to handle preflight requests
+@app.route('/', methods=['OPTIONS'])
+@app.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path=None):
+    return '', 204  # Return no content for OPTIONS requests
+
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health_check():
     """Health check endpoint"""
+    if request.method == 'OPTIONS':
+        return '', 204
     return jsonify({"status": "ok", "message": "Speech Emotion Recognition API is running"})
 
-@app.route('/api/initialize', methods=['POST'])
+@app.route('/api/initialize', methods=['POST', 'OPTIONS'])
 def initialize_model():
     """Initialize the model with the provided path"""
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     global model_service, audio_processor, asr_service
     
     data = request.get_json() or {}
@@ -126,9 +192,12 @@ def initialize_model():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/analyze', methods=['POST'])
+@app.route('/api/analyze', methods=['POST', 'OPTIONS'])
 def analyze_audio():
     """Analyze audio data for emotion"""
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     global model_service, audio_processor, asr_service
     
     if model_service is None:
@@ -275,9 +344,12 @@ def analyze_audio():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/proxy/huggingface', methods=['POST'])
+@app.route('/api/proxy/huggingface', methods=['POST', 'OPTIONS'])
 def proxy_external_inference():
     """Proxy requests to external inference API"""
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     try:
         data = request.get_json() or {}
         print("Received external inference request. Processing through handler.")
@@ -296,9 +368,11 @@ def proxy_external_inference():
         }), 500
 
 # Create an alternative route with a more generic name
-@app.route('/api/external/inference', methods=['POST'])
+@app.route('/api/external/inference', methods=['POST', 'OPTIONS'])
 def external_inference_proxy():
     """Alternate route for external inference API"""
+    if request.method == 'OPTIONS':
+        return '', 204
     return proxy_external_inference()
 
 # Socket.IO event handlers
@@ -306,6 +380,9 @@ def external_inference_proxy():
 def handle_connect():
     """Handle client connection"""
     print('Client connected')
+    # Log origin info for debugging CORS issues
+    if request.headers.get('Origin'):
+        print(f"Connection from origin: {request.headers.get('Origin')}")
     emit('connection_response', {'status': 'connected'})
 
 @socketio.on('disconnect')
@@ -424,14 +501,17 @@ if __name__ == '__main__':
     # Get the port from the environment variable or use default
     port = int(os.environ.get('PORT', 5001))
     
-    # Print startup message
+    # Configure max content length for uploads
+    app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
+    
+    # Configure logging level
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+    
+    # Print startup message with CORS configuration info
     print(f"Starting server on http://0.0.0.0:{port}")
+    print("CORS configuration: Allowing connections from model-convert-direct.pages.dev and other whitelisted domains")
     print("Press Ctrl+C to stop the server")
     
-    try:
-        # Start the Socket.IO server
-        socketio.run(app, host='0.0.0.0', port=port, debug=False)
-    except KeyboardInterrupt:
-        print("Server stopped by user")
-    except Exception as e:
-        print(f"Server error: {e}")
+    # Enable CORS headers for WebSocket and HTTP
+    socketio.run(app, host='0.0.0.0', port=port, debug=True, use_reloader=False, cors_allowed_origins='*')
