@@ -244,24 +244,6 @@ const MetricIndicator = memo<{
             )}
           </Box>
         ))}
-        
-        {/* Position indicator */}
-        <Box 
-          sx={{
-            position: 'absolute',
-            bottom: -10,
-            left: `${roundedValue}%`,
-            transform: 'translateX(-50%)',
-            width: LAYOUT.indicatorSize,
-            height: LAYOUT.indicatorSize,
-            borderRadius: '50%',
-            backgroundColor: segments[activeIndex].color,
-            boxShadow: `0 0 8px ${alpha(segments[activeIndex].color, 0.7)}`,
-            transition: ANIMATION.transition,
-            willChange: 'left, box-shadow', // Performance optimization for animation
-            zIndex: 1
-          }}
-        />
       </Box>
     </Box>
   );
@@ -974,41 +956,6 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
     return null;
   }
 
-  // Add a speech activity indicator in the UI
-  const SpeechActivityIndicator = () => {
-    // Pulsing animation for the waiting indicator
-    const pulseAnimation = waitingForVoice ? `
-      @keyframes pulse {
-        0% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0.7); }
-        70% { box-shadow: 0 0 0 6px rgba(255, 165, 0, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0); }
-      }
-    ` : '';
-    
-    return (
-      <>
-        {pulseAnimation && <style>{pulseAnimation}</style>}
-        <Box sx={{ 
-          position: 'absolute', 
-          top: 10, 
-          right: 10, 
-          width: 10, 
-          height: 10,
-          borderRadius: '50%',
-          backgroundColor: isSpeaking ? '#2ecc71' : waitingForVoice ? '#f39c12' : 'transparent',
-          border: `1px solid ${alpha(theme.palette.divider, 0.3)}`,
-          transition: 'background-color 0.2s ease-in-out',
-          boxShadow: isSpeaking 
-            ? `0 0 5px #2ecc71` 
-            : waitingForVoice 
-              ? '0 0 0 0 rgba(255, 165, 0, 0.7)' 
-              : 'none',
-          animation: waitingForVoice ? 'pulse 2s infinite' : 'none'
-        }} />
-      </>
-    );
-  };
-
   const VoiceWaitingMessage = () => {
     if (!waitingForVoice) return null;
     
@@ -1067,7 +1014,6 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       display: 'flex',
       flexDirection: 'column'
     }}>
-      <SpeechActivityIndicator />
       
       {useASRModel && (
         <Box sx={{ 
