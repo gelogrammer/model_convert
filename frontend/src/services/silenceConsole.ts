@@ -25,8 +25,6 @@ const silencedPatterns = [
   'AbortError',
   'signal is aborted',
   'Supabase 409 Conflict',
-  'width=9 cannot exceed data.shape',
-  'dimension mismatch',
   'WebSocket error'
 ];
 
@@ -40,6 +38,7 @@ export const setupConsoleSilencing = () => {
   // Replace console.error with filtered version
   console.error = function(...args: any[]) {
     const errorString = args.join(' ');
+    
     // Only display errors that don't match silenced patterns
     if (!silencedPatterns.some(pattern => errorString.includes(pattern))) {
       originalConsoleError.apply(console, args);

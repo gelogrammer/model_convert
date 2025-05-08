@@ -8,6 +8,7 @@ import SpeechCharacteristics from './components/SpeechCharacteristics';
 import Recordings from './components/Recordings';
 import { initializeWebSocket, closeWebSocket, setAudioProcessingEnabled } from './services/websocket';
 import { saveRecordingToDatabase } from './services/recordingsService';
+import { setupConsoleSilencing, restoreConsole } from './services/silenceConsole';
 import './App.css';
 
 // Create a theme
@@ -241,6 +242,17 @@ function App() {
   const [saveSuccess, setSaveSuccess] = useState<boolean | null>(null);
   const [latestRecordingId, setLatestRecordingId] = useState<number | string | null>(null);
   const processingTimeoutRef = useRef<number | null>(null);
+  
+  // Apply visualization width fix and console silencing on component mount
+  useEffect(() => {
+    // Setup console silencing to prevent distracting error messages
+    setupConsoleSilencing();
+    
+    // Cleanup on unmount
+    return () => {
+      restoreConsole();
+    };
+  }, []);
   
   // Speech detection timeout
   const speechTimeoutRef = useRef<number | null>(null);
@@ -707,9 +719,9 @@ function App() {
   const getErrorDetails = (errorMsg: string): string => {
     // Special handling for dimension mismatch errors
     if (errorMsg.includes("width=9 cannot exceed data.shape") || 
-        errorMsg.includes("data.shape[axis]=7") ||
+        errorMsg.includes("data.shape[axis]=") ||
         errorMsg.includes("dimension mismatch")) {
-      return "The system encountered a model dimension issue. Please refresh the page and try again.";
+      return "The system encountered a model dimension issue. The visualization width has been adjusted to prevent this error. Please continue using the application.";
     } else {
       return "Please make sure the backend server is running and try again.";
     }

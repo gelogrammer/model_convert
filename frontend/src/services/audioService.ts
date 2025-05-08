@@ -103,6 +103,13 @@ export const initializeAudioCapture = async (): Promise<boolean> => {
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
     
+    // Store FFT size in localStorage for error prevention in visualization
+    try {
+      localStorage.setItem('fft_size', analyser.fftSize.toString());
+    } catch (e) {
+      console.warn('Could not store FFT size in localStorage:', e);
+    }
+    
     // Create source from media stream
     audioSourceNode = audioContext.createMediaStreamSource(mediaStream);
     audioSourceNode.connect(analyser);
