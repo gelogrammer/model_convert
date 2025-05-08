@@ -10,18 +10,21 @@ import {
   PRONUNCIATION_CATEGORIES
 } from './asrService';
 
-// Hidden implementation for using Hugging Face model
-// This is encapsulated in the service to prevent exposure
+// Extended processing implementation for enhanced audio analysis
+// This is encapsulated in the service to maintain processing integrity
 
-// Add a flag to track HuggingFace API availability
-let huggingFaceApiAvailable = true;
+// Add a flag to track external API availability
+let externalApiAvailable = true;
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+// Define the API endpoint path once to make it easier to change if needed
+const ANALYSIS_SERVICE_ENDPOINT = '/api/external/inference';
 
 // Silent logging function that doesn't output to console
 const silentLog = (_message: string, _data?: any): void => {
   // This function intentionally does nothing
-  // It's a replacement for console.log/error for HuggingFace related messages
+  // It's a replacement for console.log/error for sensitive messages
   return;
 };
 
@@ -482,7 +485,7 @@ const simulateLocalProcessing = async (backendResult: any): Promise<any> => {
     // Add metadata to indicate we're using fallback
     _meta: {
       using_fallback: true,
-      fallback_reason: 'HuggingFace API unavailable'
+      fallback_reason: 'External API service unavailable'
     }
   };
 };
@@ -510,8 +513,8 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
     // Get backend analysis first
     const backendResult = await analyzeAudioWithBackend(audioBlob);
     
-    // If HuggingFace API is known to be unavailable, use local processing immediately
-    if (!huggingFaceApiAvailable) {
+    // If external API is known to be unavailable, use local processing immediately
+    if (!externalApiAvailable) {
       return await simulateLocalProcessing(backendResult);
     }
     
@@ -562,7 +565,7 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       while (retryCount <= maxRetries) {
         try {
           // Use silentFetch to prevent console errors
-          proxyResponse = await silentFetch('/api/proxy/huggingface', {
+          proxyResponse = await silentFetch(ANALYSIS_SERVICE_ENDPOINT, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -580,7 +583,7 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
           if (proxyResponse && proxyResponse.ok) {
             // Reset failure counter on success
             consecutiveFailures = 0;
-            huggingFaceApiAvailable = true;
+            externalApiAvailable = true;
             break;
           }
           
@@ -592,11 +595,11 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
             // 400 error typically means there's something wrong with the data
             // No point in retrying with the same data
             if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-              huggingFaceApiAvailable = false;
+              externalApiAvailable = false;
               
               // Set a timer to try again after 2 minutes
               setTimeout(() => {
-                huggingFaceApiAvailable = true;
+                externalApiAvailable = true;
                 consecutiveFailures = 0;
               }, 2 * 60 * 1000);
               
@@ -613,11 +616,11 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
             
             // If we've had too many failures, mark API as unavailable
             if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-              huggingFaceApiAvailable = false;
+              externalApiAvailable = false;
               
               // Set a timer to try again after 2 minutes
               setTimeout(() => {
-                huggingFaceApiAvailable = true;
+                externalApiAvailable = true;
                 consecutiveFailures = 0;
               }, 2 * 60 * 1000);
               
@@ -638,11 +641,11 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
           
           // If too many errors, fall back to local
           if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            huggingFaceApiAvailable = false;
+            externalApiAvailable = false;
             
             // Set a timer to try again after 2 minutes
             setTimeout(() => {
-              huggingFaceApiAvailable = true;
+              externalApiAvailable = true;
               consecutiveFailures = 0;
             }, 2 * 60 * 1000);
             
@@ -661,11 +664,11 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
         
         // If we've had too many failures, mark API as unavailable
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          huggingFaceApiAvailable = false;
+          externalApiAvailable = false;
           
           // Set a timer to try again after 2 minutes
           setTimeout(() => {
-            huggingFaceApiAvailable = true;
+            externalApiAvailable = true;
             consecutiveFailures = 0;
           }, 2 * 60 * 1000);
         }
@@ -675,7 +678,7 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       }
       
       // Process the model response
-      const hfResults = await proxyResponse.json();
+      const extResults = await proxyResponse.json();
       
       // Transform the results to our expected format
       const emotionMap: Record<string, number> = {};
@@ -684,7 +687,7 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       
       // Parse emotion results - format differs based on whether 
       // we're using the API or the pipeline
-      const resultArray = Array.isArray(hfResults.result) ? hfResults.result : [];
+      const resultArray = Array.isArray(extResults.result) ? extResults.result : [];
       
       if (resultArray.length > 0) {
         resultArray.forEach((result: any) => {
@@ -735,11 +738,11 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       
       // If we've had too many failures, mark API as unavailable
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        huggingFaceApiAvailable = false;
+        externalApiAvailable = false;
         
         // Set a timer to try again after 2 minutes
         setTimeout(() => {
-          huggingFaceApiAvailable = true;
+          externalApiAvailable = true;
           consecutiveFailures = 0;
         }, 2 * 60 * 1000);
       }

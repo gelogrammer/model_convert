@@ -295,6 +295,12 @@ def proxy_external_inference():
             }
         }), 500
 
+# Create an alternative route with a more generic name
+@app.route('/api/external/inference', methods=['POST'])
+def external_inference_proxy():
+    """Alternate route for external inference API"""
+    return proxy_external_inference()
+
 # Socket.IO event handlers
 @socketio.on('connect')
 def handle_connect():
