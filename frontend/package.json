@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "deploy": "wrangler pages deploy --project-name=model-convert-app --commit-dirty=true"
+    "deploy": "wrangler pages deployment create dist --project-name=model-convert-direct --branch=production --commit-message=\"Production deployment\" --commit-dirty=true"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
