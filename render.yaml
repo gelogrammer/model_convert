@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: speech-emotion-recognition-api
+    env: python
+    region: oregon
+    buildCommand: pip install -r backend/requirements.txt && mkdir -p backend/models
+    startCommand: cd backend && gunicorn minimal_app:app
+    envVars:
+      - key: PORT
+        value: 5001
+      - key: PYTHON_VERSION
+        value: 3.11.11
+    healthCheckPath: /api/health
+    autoDeploy: true
+    plan: starter 
