@@ -215,7 +215,8 @@ const AudioCapture: React.FC<AudioCaptureProps> = ({
         attempts++;
         try {
           console.log(`Save attempt ${attempts}/${maxAttempts}`);
-          success = await saveRecordingToDatabase({});
+          const result = await saveRecordingToDatabase({});
+          success = result.success;
           
           if (success) {
             console.log('Successfully saved recording');
