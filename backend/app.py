@@ -15,7 +15,7 @@ import requests
 import time
 try:
     import torch
-    from transformers import pipeline
+    from transformers.pipelines import pipeline
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     print("Warning: transformers or torch not available. Using fallback approach for Hugging Face API.")
@@ -30,13 +30,24 @@ from asr_service import ASRService
 app = Flask(__name__)
 CORS(app)
 
-# Configure Socket.IO
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Configure Socket.IO with more permissive CORS settings and longer ping timeout
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    ping_timeout=60,
+    ping_interval=25,
+    logger=True,
+    engineio_logger=True
+)
 
 # Initialize model services
 model_service = None
 audio_processor = None
 asr_service = None
+
+# Default confidence threshold for dominant emotion detection
+DEFAULT_CONFIDENCE_THRESHOLD = 0.35  # Adjusted from 0.4 to 0.35 for better sensitivity
 
 # Auto-initialize the models on startup
 def initialize_on_startup():
@@ -86,7 +97,7 @@ def initialize_model():
     """Initialize the model with the provided path"""
     global model_service, audio_processor, asr_service
     
-    data = request.json
+    data = request.get_json() or {}
     ser_model_path = data.get('model_path', 'models/SER.h5')
     asr_model_path = data.get('asr_model_path', 'models/ASR.pth')
     
@@ -124,13 +135,33 @@ def analyze_audio():
         return jsonify({"status": "error", "message": "No audio file provided"}), 400
     
     audio_file = request.files['audio']
-    confidence_threshold = request.form.get('confidence_threshold', 0.4, type=float)
+    confidence_threshold = request.form.get('confidence_threshold', DEFAULT_CONFIDENCE_THRESHOLD, type=float)
+    # Option to turn off smoothing for diagnostic purposes
+    apply_smoothing = request.form.get('apply_smoothing', 'true').lower() != 'false'
     
     try:
+        # Check if audio_processor is initialized
+        if audio_processor is None:
+            return jsonify({"status": "error", "message": "Audio processor not initialized"}), 500
+            
         # Process audio file
         audio_data = audio_processor.process_audio_file(audio_file)
         
-        # Check if speech is actually detected in the audio
+        # Apply a noise gate to filter out background noise
+        audio_data = audio_processor._normalize_audio(audio_data)
+        
+        # Check audio duration
+        audio_duration = len(audio_data) / audio_processor.sample_rate
+        if audio_duration < 0.5:
+            return jsonify({
+                "status": "warning",
+                "message": "Audio clip too short for accurate analysis (less than 0.5 seconds)",
+                "emotion": "neutral",
+                "confidence": 0.0,
+                "probabilities": {emotion: 0.0 for emotion in model_service.emotions}
+            })
+        
+        # Check if speech is actually detected in the audio with enhanced detection
         if not audio_processor.detect_speech(audio_data):
             return jsonify({
                 "status": "warning",
@@ -140,14 +171,24 @@ def analyze_audio():
                 "probabilities": {emotion: 0.0 for emotion in model_service.emotions}
             })
         
-        # Extract features
+        # Extract features with enhanced feature extraction
         features = audio_processor.extract_features(audio_data)
         
         # Predict emotion
-        emotion, confidence, all_probabilities = model_service.predict_emotion(features)
+        emotion, confidence, all_probabilities = model_service.predict_emotion(features, apply_smoothing=apply_smoothing)
         
-        # Apply confidence threshold
-        if confidence < confidence_threshold:
+        # Calculate emotion dominance ratio (highest vs second highest probability)
+        sorted_probs = sorted(all_probabilities, reverse=True)
+        dominance_ratio = sorted_probs[0] / sorted_probs[1] if len(sorted_probs) > 1 and sorted_probs[1] > 0 else 1.0
+        
+        # Apply confidence threshold with dynamic adjustment based on dominance ratio
+        adjusted_threshold = confidence_threshold
+        if dominance_ratio < 1.2:  # If top emotions are very close
+            adjusted_threshold = confidence_threshold * 1.1  # Require higher confidence
+        elif dominance_ratio > 2.0:  # If top emotion is clearly dominant
+            adjusted_threshold = confidence_threshold * 0.9  # Lower threshold
+        
+        if confidence < adjusted_threshold:
             # If confidence is low, default to neutral with a warning
             original_emotion = emotion
             emotion = "neutral"
@@ -159,7 +200,7 @@ def analyze_audio():
         speech_characteristics = {}
         speech_rate = 0
         
-        if asr_service:
+        if asr_service and audio_processor:
             try:
                 # Extract features specifically for ASR
                 asr_features = audio_processor.extract_features_for_asr(audio_data)
@@ -170,21 +211,37 @@ def analyze_audio():
                 if speech_characteristics:
                     # Calculate speech rate based on the tempo category from ASR
                     tempo_category = speech_characteristics.get("tempo", {}).get("category", "Medium Tempo")
+                    tempo_confidence = speech_characteristics.get("tempo", {}).get("confidence", 0.5)
                     
                     # Map tempo categories to approximate words per minute values
                     if tempo_category == "Fast Tempo":
-                        speech_rate = 150 + (20 * speech_characteristics["tempo"]["confidence"])
+                        speech_rate = 150 + (20 * tempo_confidence)
                     elif tempo_category == "Slow Tempo":
-                        speech_rate = 90 - (20 * speech_characteristics["tempo"]["confidence"])
+                        speech_rate = 90 - (20 * tempo_confidence)
                     else: # Medium Tempo
                         speech_rate = 120
+                    
+                    # Use speech characteristics to enhance emotion detection
+                    if speech_characteristics.get("fluency", {}).get("confidence", 0) > 0.7:
+                        # High fluency tends to indicate positive emotions or neutral state
+                        if speech_characteristics["fluency"]["category"] == "High Fluency" and emotion == "neutral" and confidence < 0.55:
+                            # Check if happiness or surprise have decent probability
+                            happiness_prob = all_probabilities[model_service.emotions.index("happiness")]
+                            surprise_prob = all_probabilities[model_service.emotions.index("surprise")]
+                            
+                            if happiness_prob > 0.2:
+                                emotion = "happiness"
+                                confidence = happiness_prob * 1.1  # Boost confidence slightly
+                            elif surprise_prob > 0.2:
+                                emotion = "surprise"
+                                confidence = surprise_prob * 1.1
                     
                     print(f"Speech rate determined from ASR: {speech_rate} WPM (Category: {tempo_category})")
             except Exception as e:
                 print(f"Error in ASR processing: {e}")
         
         # If ASR failed to provide speech rate, fall back to basic calculation
-        if speech_rate == 0:
+        if speech_rate == 0 and audio_processor:
             speech_rate = audio_processor.calculate_speech_rate(audio_data)
             print(f"Using fallback speech rate: {speech_rate}")
         
@@ -194,6 +251,7 @@ def analyze_audio():
             "emotion": emotion,
             "confidence": float(confidence),
             "speech_rate": float(speech_rate),
+            "dominance_ratio": float(dominance_ratio),
             "probabilities": {
                 emotion: float(prob) for emotion, prob in zip(model_service.emotions, all_probabilities)
             }
@@ -218,8 +276,8 @@ def analyze_audio():
 def proxy_huggingface():
     """Proxy requests to Hugging Face to avoid CORS issues"""
     try:
-        data = request.json
-        print("Received proxy request data. Keys:", list(data.keys()))
+        data = request.get_json() or {}
+        print("Received proxy request data. Keys:", list(data.keys() if data else []))
         
         # Extract data from the request
         model_id = data.get('model', 'firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3')
@@ -232,21 +290,40 @@ def proxy_huggingface():
             return jsonify({"status": "error", "message": error_msg}), 400
             
         if not api_key:
+            # Instead of 401, return 400 with message for better client-side handling
             error_msg = "Missing API key"
             print(error_msg)
-            return jsonify({"status": "error", "message": error_msg}), 401
+            return jsonify({"status": "error", "message": error_msg}), 400
         
         print(f"Processing request for model: {model_id}")
         print(f"Audio data length: {len(audio_base64)} characters")
         print(f"API key present: {bool(api_key)}")
         
-        # Convert base64 to bytes for local processing
-        audio_bytes = base64.b64decode(audio_base64)
+        # Validate base64 string format
+        try:
+            # Convert base64 to bytes for local processing
+            audio_bytes = base64.b64decode(audio_base64)
+            print(f"Successfully decoded base64 data, size: {len(audio_bytes)} bytes")
+        except Exception as e:
+            error_detail = str(e)
+            print(f"Invalid base64 data: {error_detail}")
+            # Include more details about the first few characters of the base64 string to help diagnose
+            sample = audio_base64[:50] + "..." if len(audio_base64) > 50 else audio_base64
+            print(f"Base64 sample: {sample}")
+            return jsonify({
+                "status": "error", 
+                "message": "Invalid audio data format", 
+                "details": error_detail
+            }), 400
         
         # Create temp file to process
         temp_file_path = 'temp_audio.wav'
-        with open(temp_file_path, 'wb') as f:
-            f.write(audio_bytes)
+        try:
+            with open(temp_file_path, 'wb') as f:
+                f.write(audio_bytes)
+        except Exception as e:
+            print(f"Failed to write temporary file: {str(e)}")
+            return jsonify({"status": "error", "message": "Failed to process audio data"}), 500
         
         # Try local transformers pipeline first with more robust error handling
         if TRANSFORMERS_AVAILABLE:
@@ -260,20 +337,35 @@ def proxy_huggingface():
                     token=api_key  # Add API key to the pipeline
                 )
                 
-                # Set a timeout for inference to avoid hanging
-                import signal
+                # Use threading for timeout instead of signal (for Windows compatibility)
+                import threading
                 
-                def timeout_handler(signum, frame):
+                result = None
+                timeout_occurred = False
+                
+                def run_classifier():
+                    nonlocal result
+                    try:
+                        result = classifier(temp_file_path)
+                    except Exception as e:
+                        print(f"Classifier error: {e}")
+                
+                # Create and start the thread
+                thread = threading.Thread(target=run_classifier)
+                thread.start()
+                thread.join(timeout=25)  # 25 second timeout
+                
+                if thread.is_alive():
+                    timeout_occurred = True
+                    print("Pipeline timeout after 25 seconds")
+                    # We can't terminate the thread safely in Python,
+                    # but we can continue with our fallback
+                
+                if timeout_occurred:
+                    print("Pipeline timeout")
                     raise TimeoutError("Model inference timed out")
                 
-                # Set a 25-second timeout
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(25)
-                
-                try:
-                    result = classifier(temp_file_path)
-                    # Cancel the alarm if successful
-                    signal.alarm(0)
+                if result:
                     print("Pipeline classification result:", result)
                     
                     # Clean up temp file
@@ -287,10 +379,6 @@ def proxy_huggingface():
                         "status": "success",
                         "result": result
                     })
-                except TimeoutError as te:
-                    print(f"Pipeline timeout: {str(te)}")
-                    signal.alarm(0)  # Cancel the alarm
-                    raise  # Re-raise to be caught by outer exception handler
                 
             except Exception as pipeline_error:
                 import traceback
@@ -463,7 +551,7 @@ def handle_audio_stream(data):
         audio_data = audio_processor.decode_audio_data(data['audio'])
         
         # Get confidence threshold from client or use default
-        confidence_threshold = data.get('confidence_threshold', 0.4)
+        confidence_threshold = data.get('confidence_threshold', DEFAULT_CONFIDENCE_THRESHOLD)
         
         # Check if speech is detected
         is_speech = audio_processor.detect_speech(audio_data)
@@ -479,8 +567,18 @@ def handle_audio_stream(data):
             # Predict emotion
             emotion, confidence, all_probabilities = model_service.predict_emotion(features)
             
-            # Apply confidence threshold
-            if confidence < confidence_threshold:
+            # Calculate dominance ratio (highest vs second highest probability)
+            sorted_probs = sorted(all_probabilities, reverse=True)
+            dominance_ratio = sorted_probs[0] / sorted_probs[1] if len(sorted_probs) > 1 and sorted_probs[1] > 0 else 1.0
+            
+            # Apply confidence threshold with dynamic adjustment
+            adjusted_threshold = confidence_threshold
+            if dominance_ratio < 1.2:  # If top emotions are very close
+                adjusted_threshold = confidence_threshold * 1.1  # Require higher confidence
+            elif dominance_ratio > 2.0:  # If top emotion is clearly dominant
+                adjusted_threshold = confidence_threshold * 0.9  # Lower threshold
+                
+            if confidence < adjusted_threshold:
                 # If confidence is low, default to neutral with a warning
                 original_emotion = emotion
                 emotion = "neutral"
@@ -498,6 +596,21 @@ def handle_audio_stream(data):
                     # Extract features specifically for ASR
                     asr_features = audio_processor.extract_features_for_asr(audio_data)
                     speech_characteristics = asr_service.process_audio(asr_features)
+                    
+                    # Use speech characteristics to enhance emotion detection
+                    if speech_characteristics.get("fluency", {}).get("confidence", 0) > 0.7:
+                        # High fluency tends to indicate positive emotions or neutral state
+                        if speech_characteristics["fluency"]["category"] == "High Fluency" and emotion == "neutral" and confidence < 0.55:
+                            # Check if happiness or surprise have decent probability
+                            happiness_prob = all_probabilities[model_service.emotions.index("happiness")]
+                            surprise_prob = all_probabilities[model_service.emotions.index("surprise")]
+                            
+                            if happiness_prob > 0.2:
+                                emotion = "happiness"
+                                confidence = happiness_prob * 1.1  # Boost confidence slightly
+                            elif surprise_prob > 0.2:
+                                emotion = "surprise"
+                                confidence = surprise_prob * 1.1
                 except Exception as e:
                     print(f"Error in ASR processing: {e}")
             
@@ -508,6 +621,7 @@ def handle_audio_stream(data):
                 'is_speech': True,
                 'emotion': emotion,
                 'confidence': float(confidence),
+                'dominance_ratio': float(dominance_ratio),
                 'speech_rate': float(speech_rate) if speech_rate is not None else 0,
                 'probabilities': {
                     emotion: float(prob) for emotion, prob in zip(model_service.emotions, all_probabilities)
@@ -540,5 +654,14 @@ if __name__ == '__main__':
     # Get the port from the environment variable or use default
     port = int(os.environ.get('PORT', 5001))
     
-    # Start the Socket.IO server
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    # Print startup message
+    print(f"Starting server on http://0.0.0.0:{port}")
+    print("Press Ctrl+C to stop the server")
+    
+    try:
+        # Start the Socket.IO server
+        socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    except KeyboardInterrupt:
+        print("Server stopped by user")
+    except Exception as e:
+        print(f"Server error: {e}")

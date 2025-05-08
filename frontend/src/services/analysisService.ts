@@ -18,6 +18,13 @@ let huggingFaceApiAvailable = true;
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
 
+// Silent logging function that doesn't output to console
+const silentLog = (_message: string, _data?: any): void => {
+  // This function intentionally does nothing
+  // It's a replacement for console.log/error for HuggingFace related messages
+  return;
+};
+
 // Silent fetch utility that doesn't output to console
 const silentFetch = async (url: string, options: RequestInit): Promise<Response | null> => {
   try {
@@ -27,6 +34,24 @@ const silentFetch = async (url: string, options: RequestInit): Promise<Response 
     // Return null instead of throwing or logging to console
     return null;
   }
+};
+
+// Add helper to validate base64 data before sending to API
+const validateBase64 = (base64String: string): boolean => {
+  // Basic validation: should be non-empty and contain valid base64 characters
+  if (!base64String || base64String.length < 100) {
+    return false;
+  }
+  
+  // Check if it has valid base64 pattern
+  const base64Pattern = /^[A-Za-z0-9+/=]+$/;
+  // Check a sample of the string (checking the entire string could be slow)
+  const sampleSize = 1000;
+  const sample = base64String.length > sampleSize 
+    ? base64String.substring(0, sampleSize) 
+    : base64String;
+  
+  return base64Pattern.test(sample);
 };
 
 // Speech metrics tracking container
@@ -510,10 +535,23 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       
       // Convert audio blob to base64 for API
       const audioArrayBuffer = await audioBlob.arrayBuffer();
-      const audioBase64 = btoa(
-        new Uint8Array(audioArrayBuffer)
-          .reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
+      const audioBase64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          // FileReader result contains the data URL with format prefix that needs to be removed
+          const base64String = reader.result as string;
+          // Remove the data URL prefix (e.g. "data:audio/wav;base64,")
+          const base64 = base64String.split(',')[1];
+          resolve(base64);
+        };
+        reader.readAsDataURL(new Blob([audioArrayBuffer]));
+      });
+      
+      // Validate base64 data before sending to API
+      if (!validateBase64(audioBase64)) {
+        silentLog('Invalid base64 audio data generated');
+        return await simulateLocalProcessing(backendResult);
+      }
       
       // Create a proxy endpoint through our backend to avoid CORS issues
       // Add retry logic for temporary service unavailable errors
@@ -528,15 +566,14 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-HF-Debug': 'true' // Add debug header to track API key issues
             },
             body: JSON.stringify({
               model: modelIdentifier,
               apiKey: authToken.trim(), // Ensure no whitespace
               audio: audioBase64
             }),
-            // Add a longer timeout for the fetch request
-            signal: AbortSignal.timeout(30000) // 30 second timeout
+            // Use regular fetch timeout - longer timeouts can cause connection issues
+            signal: AbortSignal.timeout(15000) // 15 second timeout
           });
           
           // Break the loop if successful
@@ -547,20 +584,41 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
             break;
           }
           
-          // If we got a 503, track it
-          if (proxyResponse && proxyResponse.status === 503) {
+          // Handle specific error codes
+          if (proxyResponse && proxyResponse.status === 400) {
+            silentLog('API returned 400 Bad Request - likely invalid input data');
             consecutiveFailures++;
             
-            // If we've had too many failures, mark API as unavailable
+            // 400 error typically means there's something wrong with the data
+            // No point in retrying with the same data
             if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
               huggingFaceApiAvailable = false;
-              console.log('HuggingFace API marked as unavailable after multiple failures');
               
               // Set a timer to try again after 2 minutes
               setTimeout(() => {
                 huggingFaceApiAvailable = true;
                 consecutiveFailures = 0;
-                console.log('Resetting HuggingFace API availability');
+              }, 2 * 60 * 1000);
+              
+              return await simulateLocalProcessing(backendResult);
+            }
+            
+            // Break the loop - we'll return error or fallback
+            break;
+          }
+          
+          // If we got another error response, log it (silently) and retry
+          if (proxyResponse) {
+            consecutiveFailures++;
+            
+            // If we've had too many failures, mark API as unavailable
+            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+              huggingFaceApiAvailable = false;
+              
+              // Set a timer to try again after 2 minutes
+              setTimeout(() => {
+                huggingFaceApiAvailable = true;
+                consecutiveFailures = 0;
               }, 2 * 60 * 1000);
               
               // Use local processing immediately
@@ -574,9 +632,22 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
           
         } catch (fetchError) {
-          // Silent error handling - no console output
+          // Silent error handling
           retryCount++;
           consecutiveFailures++;
+          
+          // If too many errors, fall back to local
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            huggingFaceApiAvailable = false;
+            
+            // Set a timer to try again after 2 minutes
+            setTimeout(() => {
+              huggingFaceApiAvailable = true;
+              consecutiveFailures = 0;
+            }, 2 * 60 * 1000);
+            
+            return await simulateLocalProcessing(backendResult);
+          }
           
           // Wait before retrying
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));

@@ -1,6 +1,7 @@
 """
 Model service for Speech Emotion Recognition.
 """
+# pyright: reportAttributeAccessIssue=false
 
 import numpy as np
 import tensorflow as tf
@@ -58,10 +59,17 @@ class ModelService:
         # Emotion mapping
         self.emotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise', 'neutral']
         
-        # Create emotion history for temporal smoothing
-        self.emotion_history = deque(maxlen=5)
+        # Create emotion history for temporal smoothing - increased history length
+        self.emotion_history = deque(maxlen=8)  # Increased from 5 to 8 for better stability
         self.current_emotion = None
         self.emotion_stability_count = 0
+        
+        # Minimum confidence threshold for valid emotion detection
+        self.min_confidence_threshold = 0.25
+        
+        # Exponential moving average for emotion probabilities
+        self.ema_probs = None
+        self.ema_alpha = 0.3  # Lower alpha for smoother transitions
         
         print("Model service initialized")
     
@@ -98,14 +106,20 @@ class ModelService:
             # Standard model has a single output
             emotion_probs = predictions[0]
         
-        # Get the raw predicted emotion
-        emotion_idx = np.argmax(emotion_probs)
+        # Apply Exponential Moving Average to probabilities for smoother transitions
+        if self.ema_probs is None:
+            self.ema_probs = emotion_probs
+        else:
+            self.ema_probs = self.ema_alpha * emotion_probs + (1 - self.ema_alpha) * self.ema_probs
+            
+        # Get the raw predicted emotion (using EMA probabilities)
+        emotion_idx = np.argmax(self.ema_probs)
         raw_emotion = self.emotions[emotion_idx]
-        raw_confidence = emotion_probs[emotion_idx]
+        raw_confidence = self.ema_probs[emotion_idx]
         
         # Apply temporal smoothing if requested
         if apply_smoothing:
-            smoothed_emotion, smoothed_confidence = self._apply_temporal_smoothing(raw_emotion, emotion_probs)
+            smoothed_emotion, smoothed_confidence = self._apply_temporal_smoothing(raw_emotion, self.ema_probs)
             return smoothed_emotion, smoothed_confidence, emotion_probs
         else:
             return raw_emotion, raw_confidence, emotion_probs
@@ -124,15 +138,16 @@ class ModelService:
         # Add current prediction to history
         self.emotion_history.append((current_raw_emotion, emotion_probs))
         
-        # Count occurrences of each emotion in history with weighting
+        # Count occurrences of each emotion in history with improved weighting
         # More recent emotions are weighted higher
         emotion_counts = {}
         emotion_total_probs = {}
         total_weights = 0
         
         for idx, (emotion, probs) in enumerate(self.emotion_history):
-            # Apply recency weight - more recent entries have higher weight
-            weight = 1.0 + idx * 0.5  # Increase weight for more recent samples
+            # Apply stronger recency weight - more recent entries have higher weight
+            # Use exponential weighting for sharper focus on recent emotions
+            weight = 1.0 + (idx * 0.6)**2  # Increased from 0.5 to 0.6, and squared for exponential weighting
             total_weights += weight
             
             # Count occurrences
@@ -141,28 +156,64 @@ class ModelService:
                 emotion_total_probs[emotion] = 0
             
             emotion_counts[emotion] += weight
-            emotion_total_probs[emotion] += probs[self.emotions.index(emotion)] * weight
+            
+            # Add confidence boost for high confidence predictions
+            confidence_boost = 1.0
+            if probs[self.emotions.index(emotion)] > 0.7:
+                confidence_boost = 1.3  # Boost high confidence predictions
+                
+            emotion_total_probs[emotion] += probs[self.emotions.index(emotion)] * weight * confidence_boost
         
-        # Find the most frequent emotion
-        most_frequent_emotion = None
-        max_count = 0
+        # Sort emotions by weighted count
+        sorted_emotions = sorted(
+            [(emotion, count) for emotion, count in emotion_counts.items()],
+            key=lambda x: x[1],
+            reverse=True
+        )
         
-        for emotion, count in emotion_counts.items():
-            if count > max_count:
-                max_count = count
-                most_frequent_emotion = emotion
+        # Get the two most frequent emotions
+        most_frequent_emotion = sorted_emotions[0][0] if sorted_emotions else 'neutral'
+        second_most_frequent = sorted_emotions[1][0] if len(sorted_emotions) > 1 else most_frequent_emotion
         
         # Calculate weighted average confidence for most frequent emotion
         avg_confidence = emotion_total_probs[most_frequent_emotion] / emotion_counts[most_frequent_emotion]
         
+        # Check if top two emotions are very close in frequency and confidence
+        if len(sorted_emotions) > 1:
+            most_freq_count = sorted_emotions[0][1]
+            second_freq_count = sorted_emotions[1][1]
+            
+            most_freq_conf = emotion_total_probs[most_frequent_emotion] / emotion_counts[most_frequent_emotion]
+            second_freq_conf = emotion_total_probs[second_most_frequent] / emotion_counts[second_most_frequent]
+            
+            # If very close in both frequency and confidence, use the one with higher confidence
+            if most_freq_count / second_freq_count < 1.1 and second_freq_conf > most_freq_conf:
+                most_frequent_emotion = second_most_frequent
+                avg_confidence = second_freq_conf
+        
         # Check if emotion has changed
         if self.current_emotion != most_frequent_emotion:
             # Only switch emotions if the new one has significantly higher confidence
+            # or if we've been in the current emotion for too long with a challenger
             if self.current_emotion and self.emotion_stability_count >= 3:
                 current_emotion_confidence = emotion_total_probs.get(self.current_emotion, 0)
-                if current_emotion_confidence > 0 and avg_confidence < current_emotion_confidence * 1.2:
-                    # Not enough improvement to switch
-                    return self.current_emotion, current_emotion_confidence / emotion_counts.get(self.current_emotion, 1)
+                current_emotion_count = emotion_counts.get(self.current_emotion, 0)
+                
+                if current_emotion_count > 0 and current_emotion_confidence > 0:
+                    current_avg_conf = current_emotion_confidence / current_emotion_count
+                    
+                    # Require more confidence to switch from neutral to another emotion
+                    switch_threshold = 1.15  # Default threshold
+                    if self.current_emotion == 'neutral':
+                        switch_threshold = 1.3  # Higher threshold to leave neutral
+                    elif most_frequent_emotion == 'neutral':
+                        switch_threshold = 1.1  # Lower threshold to go to neutral
+                    
+                    # Don't switch if the confidence increase isn't significant
+                    if avg_confidence < current_avg_conf * switch_threshold:
+                        # Don't stay in the same emotion state for too long if something else is competing
+                        if self.emotion_stability_count < 8:
+                            return self.current_emotion, current_avg_conf
             
             # Reset stability counter for new emotion
             self.emotion_stability_count = 1
@@ -182,5 +233,11 @@ class ModelService:
         # Apply weighted confidence based on stability
         stability_factor = min(1.0, self.emotion_stability_count / 5)
         smoothed_confidence = avg_confidence * stability_factor
+        
+        # Ensure minimum confidence is met - fallback to neutral if not confident enough
+        if smoothed_confidence < self.min_confidence_threshold and smoothed_emotion != 'neutral':
+            # Return neutral with a modest confidence
+            smoothed_emotion = 'neutral'
+            smoothed_confidence = 0.4  # Modest default confidence
         
         return smoothed_emotion, smoothed_confidence

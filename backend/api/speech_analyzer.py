@@ -127,8 +127,12 @@ def process_audio(audio_data, sample_rate):
 def analyze_speech(audio_data, sample_rate, boost_sensitivity=False):
     """Analyze speech using the ASR model"""
     try:
+        global asr_model
         if asr_model is None:
-            load_model()
+            success = load_model()
+            if not success or asr_model is None:
+                logger.error("Failed to load ASR model")
+                return None
             
         # Process audio to extract features
         features = process_audio(audio_data, sample_rate)
@@ -312,4 +316,4 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True, port=5000) 
+    app.run(debug=True, port=5001, host='0.0.0.0') 

@@ -152,9 +152,9 @@ class ASRService:
                     pronunciation_scores = outputs[:, 6:8]
                 
                 # Get highest scoring categories
-                fluency_idx = torch.argmax(fluency_scores, dim=1).item()
-                tempo_idx = torch.argmax(tempo_scores, dim=1).item()
-                pronunciation_idx = torch.argmax(pronunciation_scores, dim=1).item()
+                fluency_idx = int(torch.argmax(fluency_scores, dim=1).item())
+                tempo_idx = int(torch.argmax(tempo_scores, dim=1).item())
+                pronunciation_idx = int(torch.argmax(pronunciation_scores, dim=1).item())
                 
                 # Get confidence scores
                 fluency_confidence = torch.softmax(fluency_scores, dim=1)[0, fluency_idx].item()
