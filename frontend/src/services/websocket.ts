@@ -90,78 +90,95 @@ const connectSocket = (handlers: WebSocketHandlers) => {
   
   console.log(`Connecting to WebSocket server at ${serverUrl}`);
   
-  socket = io(serverUrl, {
-    transports: ['websocket', 'polling'], // Add polling as fallback
-    reconnection: true,
-    reconnectionAttempts: 10,
-    reconnectionDelay: 1000,
-    timeout: 10000, // Increase timeout
-    forceNew: true,
-    path: '/socket.io/'
-  });
+  try {
+    socket = io(serverUrl, {
+      transports: ['websocket', 'polling'], // Add polling as fallback
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      timeout: 10000, // Increase timeout
+      forceNew: true,
+      path: '/socket.io/'
+    });
 
-  // Setup event handlers
-  socket.on('connect', () => {
-    console.log('WebSocket connected');
-    connectionRetryCount = 0;
-    handlers.onConnect?.();
-    
-    // Start heartbeat after connection
+    // Setup event handlers
+    socket.on('connect', () => {
+      console.log('WebSocket connected');
+      connectionRetryCount = 0;
+      handlers.onConnect?.();
+      
+      // Start heartbeat after connection
+      startHeartbeat();
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log(`WebSocket disconnected: ${reason}`);
+      handlers.onDisconnect?.();
+      
+      // Clear heartbeat on disconnect
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('WebSocket connection error:', error);
+      
+      // Count retries to avoid infinite retry loop
+      connectionRetryCount++;
+      
+      if (connectionRetryCount >= MAX_RETRIES) {
+        console.error(`Failed to connect after ${MAX_RETRIES} attempts, giving up`);
+        socket?.close();
+        handlers.onError?.(new Error(`Connection failed after ${MAX_RETRIES} attempts. Backend may be unavailable.`));
+      } else {
+        handlers.onError?.(new Error(`Connection error: ${error.message}`));
+      }
+    });
+
+    socket.on('reconnect_attempt', (attempt) => {
+      console.log(`WebSocket reconnect attempt ${attempt}`);
+      handlers.onReconnectAttempt?.(attempt);
+    });
+
+    socket.on('reconnect', () => {
+      console.log('WebSocket reconnected');
+      connectionRetryCount = 0;
+      handlers.onReconnect?.();
+      
+      // Restart heartbeat after reconnection
+      startHeartbeat();
+    });
+
+    socket.on('emotion_result', (data) => {
+      console.log('Emotion result:', data);
+      handlers.onEmotionResult?.(data);
+    });
+
+    socket.on('error', (error) => {
+      console.error('WebSocket error:', error);
+      
+      // Check for dimension mismatch error
+      const errorMessage = error.message || 'Unknown error';
+      if (errorMessage.includes('width=9 cannot exceed data.shape') || 
+          errorMessage.includes('data.shape[axis]=7') ||
+          errorMessage.includes('dimension mismatch')) {
+        console.log('Detected model dimension mismatch error');
+        // Special handling for dimension issues
+        handlers.onError?.(new Error(`Model dimension error: ${errorMessage}`));
+      } else {
+        // Generic error handling
+        handlers.onError?.(new Error(errorMessage || 'Unknown error'));
+      }
+    });
+
+    // Start heartbeat immediately
     startHeartbeat();
-  });
-
-  socket.on('disconnect', (reason) => {
-    console.log(`WebSocket disconnected: ${reason}`);
-    handlers.onDisconnect?.();
-    
-    // Clear heartbeat on disconnect
-    if (heartbeatInterval) {
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = null;
-    }
-  });
-
-  socket.on('connect_error', (error) => {
-    console.error('WebSocket connection error:', error);
-    
-    // Count retries to avoid infinite retry loop
-    connectionRetryCount++;
-    
-    if (connectionRetryCount >= MAX_RETRIES) {
-      console.error(`Failed to connect after ${MAX_RETRIES} attempts, giving up`);
-      socket?.close();
-      handlers.onError?.(new Error(`Connection failed after ${MAX_RETRIES} attempts. Backend may be unavailable.`));
-    } else {
-      handlers.onError?.(new Error(`Connection error: ${error.message}`));
-    }
-  });
-
-  socket.on('reconnect_attempt', (attempt) => {
-    console.log(`WebSocket reconnect attempt ${attempt}`);
-    handlers.onReconnectAttempt?.(attempt);
-  });
-
-  socket.on('reconnect', () => {
-    console.log('WebSocket reconnected');
-    connectionRetryCount = 0;
-    handlers.onReconnect?.();
-    
-    // Restart heartbeat after reconnection
-    startHeartbeat();
-  });
-
-  socket.on('emotion_result', (data) => {
-    console.log('Emotion result:', data);
-    handlers.onEmotionResult?.(data);
-  });
-
-  socket.on('error', (error) => {
-    console.error('WebSocket error:', error);
-    handlers.onError?.(new Error(error.message || 'Unknown error'));
-  });
-
-  // Start heartbeat immediately
-  startHeartbeat();
+  } catch (error) {
+    console.error('Error creating socket connection:', error);
+    handlers.onError?.(new Error(`Socket creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
+  }
 };
 
 /**
@@ -220,14 +237,19 @@ export const setAudioProcessingEnabled = (enabled: boolean) => {
  */
 export const sendAudioData = (audioData: string, metadata?: any) => {
   if (socket && socket.connected) {
-    socket.emit('audio_stream', {
-      audio: audioData,
-      metadata: {
-        ...metadata || {},
-        processAudio: processAudioEnabled
-      }
-    });
-    return true;
+    try {
+      socket.emit('audio_stream', {
+        audio: audioData,
+        metadata: {
+          ...metadata || {},
+          processAudio: processAudioEnabled
+        }
+      });
+      return true;
+    } catch (error) {
+      console.error('Error sending audio data:', error);
+      return false;
+    }
   }
   return false;
 };

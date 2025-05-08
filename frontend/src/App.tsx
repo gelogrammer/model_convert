@@ -703,6 +703,18 @@ function App() {
     }
   }, []);
   
+  // Update any error display logic to handle "width=9 cannot exceed data.shape" specifically
+  const getErrorDetails = (errorMsg: string): string => {
+    // Special handling for dimension mismatch errors
+    if (errorMsg.includes("width=9 cannot exceed data.shape") || 
+        errorMsg.includes("data.shape[axis]=7") ||
+        errorMsg.includes("dimension mismatch")) {
+      return "The system encountered a model dimension issue. Please refresh the page and try again.";
+    } else {
+      return "Please make sure the backend server is running and try again.";
+    }
+  };
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -914,7 +926,7 @@ function App() {
                 {error}
               </Typography>
               <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>
-                Please make sure the backend server is running and try again.
+                {getErrorDetails(error || '')}
               </Typography>
             </Paper>
           ) : (

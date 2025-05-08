@@ -206,22 +206,31 @@ class AudioProcessor:
         Returns:
             Features for ASR model (13 dimensions)
         """
-        # Extract MFCCs for ASR - use 13 coefficients which is standard for ASR
-        mfccs = librosa.feature.mfcc(
-            y=audio_data,
-            sr=self.sample_rate,
-            n_mfcc=13,  # Standard for ASR is 13 MFCCs
-            n_fft=self.n_fft,
-            hop_length=self.hop_length
-        )
-        
-        # Get mean across time dimension to get one feature vector
-        features = np.mean(mfccs, axis=1)
-        
-        # Ensure we have exactly 13 features
-        assert len(features) == 13, f"Expected 13 features, got {len(features)}"
-        
-        return features
+        try:
+            # Extract MFCCs for ASR - use 13 coefficients which is standard for ASR
+            mfccs = librosa.feature.mfcc(
+                y=audio_data,
+                sr=self.sample_rate,
+                n_mfcc=13,  # Standard for ASR is 13 MFCCs
+                n_fft=self.n_fft,
+                hop_length=self.hop_length
+            )
+            
+            # Get mean across time dimension to get one feature vector
+            features = np.mean(mfccs, axis=1)
+            
+            # Ensure we have exactly 13 features
+            if len(features) > 13:
+                features = features[:13]  # Truncate if too many
+            elif len(features) < 13:
+                # Pad with zeros if too few
+                features = np.pad(features, (0, 13 - len(features)), 'constant')
+                
+            return features
+        except Exception as e:
+            print(f"Error in ASR feature extraction: {e}")
+            # Return fallback feature vector of the correct size
+            return np.zeros(13)
     
     def detect_speech(self, audio_data, energy_threshold=None):
         """

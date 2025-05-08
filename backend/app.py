@@ -595,24 +595,16 @@ def handle_audio_stream(data):
                 try:
                     # Extract features specifically for ASR
                     asr_features = audio_processor.extract_features_for_asr(audio_data)
-                    speech_characteristics = asr_service.process_audio(asr_features)
                     
-                    # Use speech characteristics to enhance emotion detection
-                    if speech_characteristics.get("fluency", {}).get("confidence", 0) > 0.7:
-                        # High fluency tends to indicate positive emotions or neutral state
-                        if speech_characteristics["fluency"]["category"] == "High Fluency" and emotion == "neutral" and confidence < 0.55:
-                            # Check if happiness or surprise have decent probability
-                            happiness_prob = all_probabilities[model_service.emotions.index("happiness")]
-                            surprise_prob = all_probabilities[model_service.emotions.index("surprise")]
-                            
-                            if happiness_prob > 0.2:
-                                emotion = "happiness"
-                                confidence = happiness_prob * 1.1  # Boost confidence slightly
-                            elif surprise_prob > 0.2:
-                                emotion = "surprise"
-                                confidence = surprise_prob * 1.1
+                    # Check if features are valid
+                    if asr_features is not None and len(asr_features) > 0:
+                        speech_characteristics = asr_service.process_audio(asr_features)
+                    else:
+                        print("Warning: ASR features are invalid, skipping ASR analysis")
                 except Exception as e:
                     print(f"Error in ASR processing: {e}")
+                    import traceback
+                    print(traceback.format_exc())
             
             # Prepare response
             response = {
@@ -645,6 +637,8 @@ def handle_audio_stream(data):
         emit('emotion_result', response)
     except Exception as e:
         print(f"Error processing streaming audio: {e}")
+        import traceback
+        print(traceback.format_exc())
         emit('error', {'message': str(e)})
 
 if __name__ == '__main__':

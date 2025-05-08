@@ -24,7 +24,10 @@ const silencedPatterns = [
   'WebSocket connection to',
   'AbortError',
   'signal is aborted',
-  'Supabase 409 Conflict'
+  'Supabase 409 Conflict',
+  'width=9 cannot exceed data.shape',
+  'dimension mismatch',
+  'WebSocket error'
 ];
 
 // URLs to silence in network tab

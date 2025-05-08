@@ -147,7 +147,7 @@ const SpeechTempoDisplay: React.FC<SpeechTempoDisplayProps> = ({
           data: historyRef.current,
           borderColor: '#2196f3',
           backgroundColor: 'rgba(33, 150, 243, 0.2)',
-          tension: 0.4,
+          tension: 0,
           fill: true,
         },
       ],
