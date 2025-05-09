@@ -153,7 +153,14 @@ const connectSocket = (handlers: WebSocketHandlers) => {
 
     socket.on('emotion_result', (data) => {
       console.log('Emotion result:', data);
-      handlers.onEmotionResult?.(data);
+      try {
+        // Validate and normalize the emotion data before passing it to handlers
+        const validatedData = validateEmotionData(data);
+        handlers.onEmotionResult?.(validatedData);
+      } catch (error) {
+        console.error('Error processing emotion result:', error);
+        // Don't pass invalid data to handlers
+      }
     });
 
     socket.on('error', (error) => {
@@ -162,11 +169,18 @@ const connectSocket = (handlers: WebSocketHandlers) => {
       // Check for dimension mismatch error
       const errorMessage = error.message || 'Unknown error';
       if (errorMessage.includes('width=9 cannot exceed data.shape') || 
-          errorMessage.includes('data.shape[axis]=7') ||
+          errorMessage.includes('data.shape[axis]=') ||
           errorMessage.includes('dimension mismatch')) {
         console.log('Detected model dimension mismatch error');
         // Special handling for dimension issues
         handlers.onError?.(new Error(`Model dimension error: ${errorMessage}`));
+        
+        // Set a local storage flag to indicate this error happened
+        try {
+          localStorage.setItem('dimensionMismatchDetected', 'true');
+        } catch (e) {
+          console.error('Failed to set local storage flag:', e);
+        }
       } else {
         // Generic error handling
         handlers.onError?.(new Error(errorMessage || 'Unknown error'));
@@ -259,4 +273,52 @@ export const sendAudioData = (audioData: string, metadata?: any) => {
  */
 export const isWebSocketConnected = () => {
   return socket?.connected || false;
+};
+
+/**
+ * Validate and normalize emotion data to ensure consistent dimensions
+ */
+const validateEmotionData = (data: any) => {
+  if (!data) return null;
+  
+  // Standard emotions we expect from the model
+  const standardEmotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise', 'neutral'];
+  
+  // Check if probabilities exist and have the right structure
+  if (!data.probabilities) {
+    // Create default empty probabilities if missing
+    data.probabilities = standardEmotions.reduce((acc: Record<string, number>, emotion) => {
+      acc[emotion] = 0;
+      return acc;
+    }, {});
+  } else {
+    // Ensure all standard emotions are present
+    standardEmotions.forEach(emotion => {
+      if (typeof data.probabilities[emotion] !== 'number') {
+        data.probabilities[emotion] = 0;
+      }
+    });
+    
+    // Remove any emotions that aren't in our standard list
+    const extraEmotions = Object.keys(data.probabilities).filter(
+      emotion => !standardEmotions.includes(emotion)
+    );
+    
+    extraEmotions.forEach(emotion => {
+      delete data.probabilities[emotion];
+    });
+  }
+  
+  // Ensure emotion field is valid
+  if (!data.emotion || !standardEmotions.includes(data.emotion)) {
+    // Find highest probability emotion
+    const highestEmotion = Object.entries(data.probabilities)
+      .reduce((highest, [emotion, prob]) => {
+        return (prob as number) > highest.prob ? { emotion, prob: prob as number } : highest;
+      }, { emotion: 'neutral', prob: 0 });
+    
+    data.emotion = highestEmotion.emotion;
+  }
+  
+  return data;
 };

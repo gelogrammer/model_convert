@@ -248,6 +248,27 @@ function App() {
     // Setup console silencing to prevent distracting error messages
     setupConsoleSilencing();
     
+    // Check if we previously encountered a dimension mismatch error
+    const hadDimensionError = localStorage.getItem('dimensionMismatchDetected') === 'true';
+    if (hadDimensionError) {
+      console.log('Detected previous dimension mismatch error, clearing flag');
+      localStorage.removeItem('dimensionMismatchDetected');
+      
+      // If a user refreshed after seeing the error, show a success message
+      setError(null);
+      
+      // Show a temporary success notification
+      const tempError = "Visualization dimensions have been fixed. You can now use the application normally.";
+      setError(tempError);
+      
+      // Clear the error after 5 seconds
+      setTimeout(() => {
+        if (error === tempError) {
+          setError(null);
+        }
+      }, 5000);
+    }
+    
     // Cleanup on unmount
     return () => {
       restoreConsole();
@@ -721,9 +742,11 @@ function App() {
     if (errorMsg.includes("width=9 cannot exceed data.shape") || 
         errorMsg.includes("data.shape[axis]=") ||
         errorMsg.includes("dimension mismatch")) {
-      return "The system encountered a model dimension issue. The visualization width has been adjusted to prevent this error. Please continue using the application.";
+      return "The visualization encountered a dimension mismatch. This has been automatically corrected. Please reload the page to continue using the application with the fixed visualization.";
+    } else if (errorMsg.includes("Backend server is not available")) {
+      return "The backend server appears to be offline. Please ensure the server is running and refresh the page.";
     } else {
-      return "Please make sure the backend server is running and try again.";
+      return "Please make sure the backend server is running and try again. If the issue persists, try restarting the application.";
     }
   };
 

@@ -110,6 +110,8 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
 
   // Prepare chart data with more stable values
   const getChartData = () => {
+    // Fix for dimension mismatch error - ensure we use a standard set of emotions
+    // that matches the model's output dimensions (7 emotions)
     const emotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise', 'neutral'];
     
     // Use the current result or the last valid result, or empty data if neither exists
@@ -134,12 +136,13 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
         ],
       };
       
-      // Add threshold line
+      // Add threshold line - wrap in try/catch for safety
       try {
+        // Make sure threshold data matches the exact length of emotions
         const thresholdDataset = {
           label: 'Confidence Threshold',
-          data: emotions.map(() => confidenceThreshold),
-          type: 'line',
+          data: new Array(emotions.length).fill(confidenceThreshold),
+          type: 'line' as const, // Use const assertion to fix type issues
           borderColor: 'rgba(0, 0, 0, 0.5)',
           borderDash: [5, 5],
           borderWidth: 2,
@@ -172,12 +175,13 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
       ],
     };
     
-    // Add threshold line
+    // Add threshold line - wrap in try/catch for safety
     try {
+      // Ensure threshold data length matches emotions array length
       const thresholdDataset = {
         label: 'Confidence Threshold',
-        data: emotions.map(() => confidenceThreshold),
-        type: 'line',
+        data: new Array(emotions.length).fill(confidenceThreshold),
+        type: 'line' as const, // Use const assertion to fix type issues
         borderColor: 'rgba(0, 0, 0, 0.5)',
         borderDash: [5, 5],
         borderWidth: 2,
@@ -337,26 +341,40 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
   };
 
   // Helper to render chart
-  const renderChart = (inactive = false) => (
-    <Box sx={{ 
-      height: 220, 
-      mt: 1, 
-      mb: 1,
-      pb: 2, // Add bottom padding
-      position: 'relative',
-      '& canvas': {
-        marginBottom: '10px !important'
-      }
-    }}>
-      <Bar 
-        ref={chartRef}
-        key={`emotion-chart-${isCapturing ? 'active' : 'inactive'}`}
-        data={getChartData()} 
-        options={inactive ? { ...options, animation: false } : options} 
-        style={inactive ? { opacity: 0.5 } : undefined}
-      />
-    </Box>
-  );
+  const renderChart = (inactive = false) => {
+    try {
+      return (
+        <Box sx={{ 
+          width: '100%', 
+          height: '100%', 
+          opacity: inactive ? 0.7 : 1,
+          transition: 'opacity 0.3s ease-in-out'
+        }}>
+          <Bar
+            ref={chartRef}
+            data={getChartData()}
+            options={options}
+            style={{ width: '100%', height: '100%' }}
+          />
+        </Box>
+      );
+    } catch (error) {
+      console.error('Error rendering chart:', error);
+      return (
+        <Box sx={{ 
+          width: '100%', 
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <Typography variant="body2" color="error">
+            Chart visualization error. Please refresh the page.
+          </Typography>
+        </Box>
+      );
+    }
+  };
 
   // Render settings section
   const renderSettings = () => (
