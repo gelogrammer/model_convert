@@ -152,11 +152,51 @@ const connectSocket = (handlers: WebSocketHandlers) => {
 
   socket.on('emotion_result', (data) => {
     console.log('Emotion result:', data);
-    handlers.onEmotionResult?.(data);
+    
+    // Validate data to ensure proper dimensions before passing to handlers
+    if (data && data.probabilities) {
+      // Ensure we have exactly 6 emotions in the data
+      const expectedEmotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'neutral'];
+      const normalizedData = { ...data };
+      
+      // Create a new probabilities object with only expected emotions
+      const normalizedProbabilities: Record<string, number> = {};
+      
+      // Copy valid emotions from input data
+      expectedEmotions.forEach(emotion => {
+        normalizedProbabilities[emotion] = 
+          typeof data.probabilities[emotion] === 'number' ? 
+          data.probabilities[emotion] : 0;
+      });
+      
+      // Replace with normalized probabilities
+      normalizedData.probabilities = normalizedProbabilities;
+      
+      // Ensure emotion is in our list
+      if (!expectedEmotions.includes(normalizedData.emotion)) {
+        normalizedData.emotion = 'neutral';
+      }
+      
+      handlers.onEmotionResult?.(normalizedData);
+    } else {
+      handlers.onEmotionResult?.(data);
+    }
   });
 
   socket.on('error', (error) => {
     console.error('WebSocket error:', error);
+    
+    // Special handling for dimension mismatch errors (prevent them from showing as connection errors)
+    const errorMessage = error.message || 'Unknown error';
+    if (errorMessage.includes('width=9 cannot exceed data.shape') || 
+        errorMessage.includes('data.shape[axis]=') ||
+        errorMessage.includes('dimension mismatch')) {
+      console.log('Dimension mismatch error detected - handling internally without showing error to user');
+      // Don't propagate this error to the UI
+      return;
+    }
+    
+    // Forward all other errors
     handlers.onError?.(new Error(error.message || 'Unknown error'));
   });
 

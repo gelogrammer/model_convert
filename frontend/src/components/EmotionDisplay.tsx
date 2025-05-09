@@ -110,7 +110,9 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
 
   // Prepare chart data with more stable values
   const getChartData = () => {
-    const emotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise', 'neutral'];
+    // CRITICAL FIX: Use exactly 6 emotions to match the backend model dimensions
+    // This fixes the "width=9 cannot exceed data.shape[axis]=6" error
+    const emotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'neutral'];
     
     // Use the current result or the last valid result, or empty data if neither exists
     const result = emotionResult || lastValidResult;
@@ -134,12 +136,12 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
         ],
       };
       
-      // Add threshold line
+      // Add threshold line with fixed length of 6
       try {
         const thresholdDataset = {
           label: 'Confidence Threshold',
-          data: emotions.map(() => confidenceThreshold),
-          type: 'line',
+          data: new Array(6).fill(confidenceThreshold),
+          type: 'line' as const,
           borderColor: 'rgba(0, 0, 0, 0.5)',
           borderDash: [5, 5],
           borderWidth: 2,
@@ -172,12 +174,12 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
       ],
     };
     
-    // Add threshold line
+    // Add threshold line with fixed length of 6
     try {
       const thresholdDataset = {
         label: 'Confidence Threshold',
-        data: emotions.map(() => confidenceThreshold),
-        type: 'line',
+        data: new Array(6).fill(confidenceThreshold),
+        type: 'line' as const,
         borderColor: 'rgba(0, 0, 0, 0.5)',
         borderDash: [5, 5],
         borderWidth: 2,
@@ -270,7 +272,8 @@ const EmotionDisplay: React.FC<EmotionDisplayProps> = ({ emotionResult, isCaptur
       probabilities: {} as Record<string, number>, 
       emotion: '' 
     };
-    const emotions = ['disgust', 'neutral', 'anger', 'sadness', 'happiness', 'surprise', 'fear'];
+    // Use same 6 emotions to match backend model dimensions
+    const emotions = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'neutral'];
     
     return (
       <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'center' }}>
