@@ -24,20 +24,20 @@ const LAYOUT = {
 
 // Add a constant for smoothing configuration to make it more responsive
 const SMOOTHING = {
-  // Lower value = faster response to new data (reduced from 0.5 to 0.3)
-  factor: 0.3,
-  // Minimum change threshold to update UI (prevents tiny jitters)
-  threshold: 0.005,
+  // Lower value = faster response to new data
+  factor: 0.2, // Reduced for faster response
+  // Minimum change threshold to update UI
+  threshold: 0.002, // Lower threshold to detect smaller changes
   // Minimum refresh interval (in ms)
-  minUpdateInterval: 100
+  minUpdateInterval: 50 // Faster updates
 };
 
-// Add speech activity detection parameters (from voice_test_gui.py)
+// Add speech activity detection parameters
 const SPEECH_DETECTION = {
-  energyThreshold: 0.01, // Energy threshold for speech detection
-  minSpeechDuration: 0.5, // Minimum duration of speech (seconds) to trigger analysis
-  analysisDelay: 200, // Milliseconds to wait before starting analysis after detecting speech
-  forceUpdateInterval: 5000 // Force update every 5 seconds even without speech
+  energyThreshold: 0.008, // More sensitive threshold
+  minSpeechDuration: 0.25, // Shorter detection time
+  analysisDelay: 150, // Faster analysis
+  forceUpdateInterval: 2000 // More frequent updates
 };
 
 // Add constant for voice inactivity detection
@@ -244,24 +244,6 @@ const MetricIndicator = memo<{
             )}
           </Box>
         ))}
-        
-        {/* Position indicator */}
-        <Box 
-          sx={{
-            position: 'absolute',
-            bottom: -10,
-            left: `${roundedValue}%`,
-            transform: 'translateX(-50%)',
-            width: LAYOUT.indicatorSize,
-            height: LAYOUT.indicatorSize,
-            borderRadius: '50%',
-            backgroundColor: segments[activeIndex].color,
-            boxShadow: `0 0 8px ${alpha(segments[activeIndex].color, 0.7)}`,
-            transition: ANIMATION.transition,
-            willChange: 'left, box-shadow', // Performance optimization for animation
-            zIndex: 1
-          }}
-        />
       </Box>
     </Box>
   );
@@ -439,17 +421,34 @@ const createAsrWorker = () => {
     classProbabilities['medium_fluency'] = mediumFluencyProb;
     classProbabilities['low_fluency'] = lowFluencyProb;
     
-    // More accurate tempo mapping
-    const tempoBase = tempoValue;
-    const fastTempoProb = characteristics.tempo.category.toLowerCase().includes('fast') ? 
-                         0.6 + (0.3 * tempoConfidence) : 
-                         Math.pow(tempoBase, 1.2) * 0.7;
-    
-    const slowTempoProb = characteristics.tempo.category.toLowerCase().includes('slow') ? 
-                         0.6 + (0.3 * tempoConfidence) : 
-                         Math.pow(1 - tempoBase, 1.2) * 0.7;
-    
-    const mediumTempoProb = 1 - (fastTempoProb + slowTempoProb);
+    // More accurate tempo mapping with improved category detection
+    const isTempoFast = characteristics.tempo.category.toLowerCase().includes('fast');
+    const isTempoMedium = characteristics.tempo.category.toLowerCase().includes('medium');
+    const isTempoSlow = characteristics.tempo.category.toLowerCase().includes('slow');
+
+    // Use direct category mapping with confidence weighting
+    let fastTempoProb = 0, mediumTempoProb = 0, slowTempoProb = 0;
+
+    if (isTempoFast) {
+      fastTempoProb = 0.75 + (0.25 * tempoConfidence);
+      slowTempoProb = 0.05 + (0.05 * (1 - tempoConfidence));
+      mediumTempoProb = 1 - (fastTempoProb + slowTempoProb);
+    } else if (isTempoMedium) {
+      mediumTempoProb = 0.75 + (0.25 * tempoConfidence);
+      const remainder = 1 - mediumTempoProb;
+      fastTempoProb = remainder / 2;
+      slowTempoProb = remainder / 2;
+    } else if (isTempoSlow) {
+      slowTempoProb = 0.75 + (0.25 * tempoConfidence);
+      fastTempoProb = 0.05 + (0.05 * (1 - tempoConfidence));
+      mediumTempoProb = 1 - (slowTempoProb + fastTempoProb);
+    } else {
+      // Fallback to calculated value 
+      const tempoBase = tempoValue;
+      fastTempoProb = Math.pow(tempoBase, 1.2) * 0.75;
+      slowTempoProb = Math.pow(1 - tempoBase, 1.2) * 0.75;
+      mediumTempoProb = 1 - (fastTempoProb + slowTempoProb);
+    }
     
     classProbabilities['fast_tempo'] = fastTempoProb;
     classProbabilities['medium_tempo'] = mediumTempoProb;
@@ -526,16 +525,25 @@ const createAsrWorker = () => {
         return isNaN(current) ? 0 : current;
       }
       
-      // Skip smoothing for small changes to improve perceived responsiveness
+      // Detect significant changes to respond immediately
       const diff = Math.abs(current - previous);
+      if (diff > 0.1) {
+        // For large changes, respond almost immediately
+        return current * 0.8 + previous * 0.2;
+      }
+      
+      // Skip smoothing for small changes
       if (diff < SMOOTHING.threshold) {
         return previous;
       }
       
-      // Adjust smoothing factor based on speaking state and weight
+      // Dynamic smoothing factor based on change magnitude
+      const dynamicFactor = Math.max(0.1, Math.min(0.9, smoothingFactor * (1 - diff)));
+      
+      // Apply appropriate smoothing based on speaking state and weight
       const adjustedFactor = isSpeaking ? 
-        smoothingFactor * 0.8 * weight : // More responsive when speaking
-        smoothingFactor * 1.2; // Less responsive when silent
+        dynamicFactor * 0.6 * weight : // More responsive when speaking
+        dynamicFactor * 0.9; // Still fairly responsive when silent
         
       const smoothedValue = previous * adjustedFactor + current * (1 - adjustedFactor);
       return isNaN(smoothedValue) ? current : smoothedValue;
@@ -845,6 +853,29 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       });
     }
   }, [characteristics, isCapturing, useASRModel, asrMetrics, analysisCount, shouldAnalyze, isSpeaking]);
+
+  // Add dedicated update effect for continuous processing
+  useEffect(() => {
+    if (!characteristics || !isCapturing || !useASRModel || !workerRef.current) return;
+    
+    // Create interval for continuous updates regardless of speech state
+    const updateIntervalId = setInterval(() => {
+      const currentTime = Date.now();
+      
+      workerRef.current!.postMessage({
+        type: 'process_speech',
+        data: {
+          characteristics,
+          timestamp: currentTime,
+          previousMetrics: asrMetrics,
+          analysisCount: analysisCount + 1,
+          isSpeaking
+        }
+      });
+    }, 200); // Update every 200ms for smoother real-time experience
+    
+    return () => clearInterval(updateIntervalId);
+  }, [characteristics, isCapturing, useASRModel, asrMetrics, analysisCount, isSpeaking]);
   
   // Store last valid values
   useEffect(() => {
@@ -974,41 +1005,6 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
     return null;
   }
 
-  // Add a speech activity indicator in the UI
-  const SpeechActivityIndicator = () => {
-    // Pulsing animation for the waiting indicator
-    const pulseAnimation = waitingForVoice ? `
-      @keyframes pulse {
-        0% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0.7); }
-        70% { box-shadow: 0 0 0 6px rgba(255, 165, 0, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0); }
-      }
-    ` : '';
-    
-    return (
-      <>
-        {pulseAnimation && <style>{pulseAnimation}</style>}
-        <Box sx={{ 
-          position: 'absolute', 
-          top: 10, 
-          right: 10, 
-          width: 10, 
-          height: 10,
-          borderRadius: '50%',
-          backgroundColor: isSpeaking ? '#2ecc71' : waitingForVoice ? '#f39c12' : 'transparent',
-          border: `1px solid ${alpha(theme.palette.divider, 0.3)}`,
-          transition: 'background-color 0.2s ease-in-out',
-          boxShadow: isSpeaking 
-            ? `0 0 5px #2ecc71` 
-            : waitingForVoice 
-              ? '0 0 0 0 rgba(255, 165, 0, 0.7)' 
-              : 'none',
-          animation: waitingForVoice ? 'pulse 2s infinite' : 'none'
-        }} />
-      </>
-    );
-  };
-
   const VoiceWaitingMessage = () => {
     if (!waitingForVoice) return null;
     
@@ -1067,13 +1063,11 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       display: 'flex',
       flexDirection: 'column'
     }}>
-      <SpeechActivityIndicator />
       
       {useASRModel && (
         <Box sx={{ 
           display: 'flex', 
           alignItems: 'center',
-          justifyContent: 'space-between',
           mb: 2,
           pb: 1,
           borderBottom: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
@@ -1099,21 +1093,6 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
               )}
             </Box>
           </Box>
-          
-          <Chip
-            label={`Score: ${Math.round(throttledMetrics.overallScore * 100)}`}
-            size="small"
-            sx={{
-              height: 24,
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              borderRadius: '4px',
-              backgroundColor: getScoreColor(throttledMetrics.overallScore),
-              color: 'white',
-              minWidth: 80,
-              flexShrink: 0
-            }}
-          />
         </Box>
       )}
       
@@ -1142,12 +1121,37 @@ const SpeechCharacteristics: React.FC<SpeechCharacteristicsProps> = ({
       </Box>
       
       {useASRModel && (
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          my: 2,
+          pb: 1,
+          borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+        }}>
+          <Chip
+            label={`Overall Score: ${Math.round(throttledMetrics.overallScore * 100)}`}
+            size="medium"
+            sx={{
+              height: 32,
+              fontSize: '0.9rem',
+              fontWeight: 700,
+              borderRadius: '4px',
+              backgroundColor: getScoreColor(throttledMetrics.overallScore),
+              color: 'white',
+              minWidth: 120,
+              boxShadow: `0 2px 4px ${alpha(getScoreColor(throttledMetrics.overallScore), 0.4)}`
+            }}
+          />
+        </Box>
+      )}
+      
+      {useASRModel && (
         <Box sx={{ 
           display: 'flex', 
           justifyContent: 'space-between', 
-          mt: 2,
+          mt: 1,
           pt: 1,
-          borderTop: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
           height: LAYOUT.footerHeight,
           width: '100%'
         }}>
