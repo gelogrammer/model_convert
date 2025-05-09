@@ -757,69 +757,53 @@ export const saveViewAnalysis = async (analysisData: any) => {
       }
     }
     
-    // Insert the analysis data into the audio_analysis table
+    // Prepare the data for insertion or update
+    const formattedData = {
+      recording_id: analysisData.recording_id,
+      duration: analysisData.duration || 0,
+      average_volume: analysisData.averageVolume || 0,
+      peak_volume: analysisData.peakVolume || 0,
+      silence_duration: analysisData.silenceDuration || 0,
+      speech_rate: Math.round(analysisData.speechRate) || 0,
+      word_count: analysisData.wordCount || 0,
+      fluency: analysisData.speechRateCategory?.fluency || 'Medium Fluency',
+      tempo: analysisData.speechRateCategory?.tempo || 'Medium Tempo',
+      pronunciation: analysisData.speechRateCategory?.pronunciation || 'Clear Pronunciation',
+      audio_clarity: analysisData.audioQuality?.clarity || 0.7,
+      noise_level: analysisData.audioQuality?.noiseLevel || 0.3,
+      distortion: analysisData.audioQuality?.distortion || 0.1,
+      dominant_emotion: dominantEmotion,
+      emotion_confidence: emotionConfidence,
+      segments: analysisData.segments || [],
+      updated_at: new Date().toISOString()
+    };
+    
+    // Use upsert operation instead of insert to handle conflicts automatically
     const { data, error } = await supabase
       .from('audio_analysis')
-      .insert([
-        {
-          recording_id: analysisData.recording_id,
-          duration: analysisData.duration || 0,
-          average_volume: analysisData.averageVolume || 0,
-          peak_volume: analysisData.peakVolume || 0,
-          silence_duration: analysisData.silenceDuration || 0,
-          speech_rate: Math.round(analysisData.speechRate) || 0,
-          word_count: analysisData.wordCount || 0,
-          fluency: analysisData.speechRateCategory?.fluency || 'Medium Fluency',
-          tempo: analysisData.speechRateCategory?.tempo || 'Medium Tempo',
-          pronunciation: analysisData.speechRateCategory?.pronunciation || 'Clear Pronunciation',
-          audio_clarity: analysisData.audioQuality?.clarity || 0.7,
-          noise_level: analysisData.audioQuality?.noiseLevel || 0.3,
-          distortion: analysisData.audioQuality?.distortion || 0.1,
-          dominant_emotion: dominantEmotion,
-          emotion_confidence: emotionConfidence,
-          segments: analysisData.segments || []
-        }
-      ])
+      .upsert([formattedData], { 
+        onConflict: 'recording_id', 
+        ignoreDuplicates: false // Update if exists
+      })
       .select();
     
     if (error) {
-      // If the record already exists (due to the unique constraint), perform an update instead
-      if (error.code === '23505') {  // Unique violation code
-        console.log('Recording analysis already exists, updating instead...');
+      console.error('Error saving audio analysis:', error);
+      
+      // For any errors other than conflicts, try to check if it's a recording_id constraint
+      // and attempt direct update as fallback
+      const { data: updateData, error: updateError } = await supabase
+        .from('audio_analysis')
+        .update(formattedData)
+        .eq('recording_id', analysisData.recording_id)
+        .select();
         
-        const { data: updateData, error: updateError } = await supabase
-          .from('audio_analysis')
-          .update({
-            duration: analysisData.duration || 0,
-            average_volume: analysisData.averageVolume || 0,
-            peak_volume: analysisData.peakVolume || 0,
-            silence_duration: analysisData.silenceDuration || 0,
-            speech_rate: Math.round(analysisData.speechRate) || 0,
-            word_count: analysisData.wordCount || 0,
-            fluency: analysisData.speechRateCategory?.fluency || 'Medium Fluency',
-            tempo: analysisData.speechRateCategory?.tempo || 'Medium Tempo',
-            pronunciation: analysisData.speechRateCategory?.pronunciation || 'Clear Pronunciation',
-            audio_clarity: analysisData.audioQuality?.clarity || 0.7,
-            noise_level: analysisData.audioQuality?.noiseLevel || 0.3,
-            distortion: analysisData.audioQuality?.distortion || 0.1,
-            dominant_emotion: dominantEmotion,
-            emotion_confidence: emotionConfidence,
-            segments: analysisData.segments || [],
-            updated_at: new Date().toISOString()
-          })
-          .eq('recording_id', analysisData.recording_id)
-          .select();
-          
-        if (updateError) {
-          console.error('Error updating audio analysis:', updateError);
-          return { data: null, error: updateError };
-        }
-        
-        return { data: updateData, error: null };
+      if (updateError) {
+        console.error('Error with fallback update of audio analysis:', updateError);
+        return { data: null, error: updateError };
       }
       
-      console.error('Error saving audio analysis:', error);
-      return { data: null, error };
+      return { data: updateData, error: null };
     }
     
     return { data, error: null };
