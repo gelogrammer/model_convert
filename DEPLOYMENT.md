@@ -73,7 +73,7 @@ This guide will walk you through deploying:
    - **Root Directory**: `backend`
    - **Runtime**: Python 3.10 (recommended for best compatibility)
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn app:app --timeout 120 --worker-class eventlet`
+   - **Start Command**: `gunicorn app:app --timeout 120`
    - **Instance Type**: Standard (512 MB RAM recommended as the free tier may have insufficient memory for ML models)
 
 5. Add environment variables:
@@ -118,6 +118,66 @@ This guide will walk you through deploying:
 4. **Slow Cold Starts**: The free tier sleeps after inactivity
    - Set up a ping service to keep your service active
    - Implement lazy loading for models to improve startup time
+
+### 3. Important: Handling Model Files
+
+The application requires model files (`SER.h5` and `ASR.pth`) to function correctly. There are two ways to handle this:
+
+#### Option 1: Include Models in Git Repository (Recommended for smaller models)
+
+1. Create a `models` directory in your backend folder if it doesn't exist:
+   ```bash
+   mkdir -p backend/models
+   ```
+
+2. Copy your model files to this directory:
+   ```bash
+   cp SER.h5 backend/models/
+   cp ASR.pth backend/models/
+   ```
+
+3. Add these files to your Git repository:
+   ```bash
+   git add backend/models/SER.h5 backend/models/ASR.pth
+   git commit -m "Add model files for deployment"
+   git push
+   ```
+
+4. Render will clone your repository with the models included.
+
+#### Option 2: Use Cloud Storage for Models (For larger models)
+
+If your models are too large for Git, set up a download script:
+
+1. Create a script in your backend folder to download models during deployment:
+   ```python
+   # backend/download_models.py
+   import os
+   import requests
+   
+   os.makedirs('models', exist_ok=True)
+   
+   # Download SER model
+   ser_url = "YOUR_CLOUD_STORAGE_URL/SER.h5"
+   response = requests.get(ser_url)
+   with open('models/SER.h5', 'wb') as f:
+       f.write(response.content)
+   
+   # Download ASR model
+   asr_url = "YOUR_CLOUD_STORAGE_URL/ASR.pth"
+   response = requests.get(asr_url)
+   with open('models/ASR.pth', 'wb') as f:
+       f.write(response.content)
+   
+   print("Models downloaded successfully")
+   ```
+
+2. Update your Build Command on Render to include the download step:
+   ```
+   pip install -r requirements.txt && python download_models.py
+   ```
+
+3. Make sure to upload your models to a cloud storage service (Google Drive, AWS S3, etc.) and update the URLs in the script.
 
 ## Part 2: Frontend Deployment to Cloudflare Pages
 
