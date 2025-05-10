@@ -25,6 +25,7 @@ interface ExtendedAudioAnalysisResult extends AudioAnalysisResult {
   };
   dominantEmotion?: string;
   emotionAnalysis?: string;
+  emotionProbabilities?: Record<string, number>;
 }
 
 interface RecordingsProps {
@@ -981,6 +982,7 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
               speechRateCategory: speechCharacteristics.speechRateCategory,
               speechMetrics: speechCharacteristics.metrics,
               dominantEmotion: analysisWithASR.dominantEmotion || "Neutral",
+              emotionProbabilities: analysisWithASR.emotionProbabilities
             };
             
             // Generate emotion analysis if not already present
@@ -1830,9 +1832,35 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
                   gridColumn: { xs: 'auto', sm: '1 / -1' }
                 }}>
                   <Typography variant="body2" color="text.secondary">Dominant Emotion</Typography>
-                  <Typography variant="h6">
+                  <Typography variant="h6" sx={{ mb: 1 }}>
                     {(selectedAnalysis as any).dominantEmotion || "Unknown"}
+                    {selectedAnalysis.emotionProbabilities && (
+                      <Typography component="span" variant="body2" sx={{ ml: 1, color: 'text.secondary' }}>
+                        ({Math.round((selectedAnalysis.emotionProbabilities[(selectedAnalysis as any).dominantEmotion?.toLowerCase()] || 0) * 100)}%)
+                      </Typography>
+                    )}
                   </Typography>
+                  
+                  {selectedAnalysis.emotionProbabilities && (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
+                      {Object.entries(selectedAnalysis.emotionProbabilities)
+                        .filter(([emotion]) => emotion !== (selectedAnalysis as any).dominantEmotion?.toLowerCase())
+                        .sort(([, a], [, b]) => (b as number) - (a as number))
+                        .map(([emotion, probability]) => (
+                          <Chip
+                            key={emotion}
+                            label={`${emotion.charAt(0).toUpperCase() + emotion.slice(1)}: ${Math.round((probability as number) * 100)}%`}
+                            size="small"
+                            sx={{
+                              height: '20px',
+                              fontSize: '0.7rem',
+                              backgroundColor: 'rgba(30, 41, 59, 0.8)',
+                              color: '#fff'
+                            }}
+                          />
+                        ))}
+                    </Box>
+                  )}
                 </Box>
               </Box>
               

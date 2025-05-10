@@ -869,6 +869,7 @@ export const createCompleteAnalysis = async (
 ): Promise<AudioAnalysisResult & { 
   dominantEmotion: string; 
   emotionAnalysis: string;
+  emotionProbabilities: Record<string, number>;
 }> => {
   // Get emotion analysis from advanced model
   const modelResult = await analyzeAudioWithModel(audioBlob);
@@ -900,7 +901,7 @@ export const createCompleteAnalysis = async (
   
   // Calculate audio metrics
   const wordCount = Math.round(speechRate * audioDuration) || Math.round(audioDuration * 2);
-  const silenceDuration = audioDuration * 0.2; // Estimate
+  const silenceDuration = audioDuration * 0.2;
   
   // Default speech rate categories if none provided
   const defaultSpeechRateCategory = {
@@ -939,6 +940,7 @@ export const createCompleteAnalysis = async (
   return {
     ...analysisResult,
     dominantEmotion,
-    emotionAnalysis
+    emotionAnalysis,
+    emotionProbabilities: probabilities
   };
 }; 
