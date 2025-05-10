@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
+from typing import List
 
 class ASRService:
     """Service for handling the ASR model for speech characteristics analysis"""
@@ -92,9 +93,9 @@ class ASRService:
         self.model.eval()  # Set to evaluation mode
         
         # Define categories
-        self.fluency_categories = ["High Fluency", "Medium Fluency", "Low Fluency"]
-        self.tempo_categories = ["Fast Tempo", "Medium Tempo", "Slow Tempo"]
-        self.pronunciation_categories = ["Clear Pronunciation", "Unclear Pronunciation"]
+        self.fluency_categories: List[str] = ["High Fluency", "Medium Fluency", "Low Fluency"]
+        self.tempo_categories: List[str] = ["Fast Tempo", "Medium Tempo", "Slow Tempo"]
+        self.pronunciation_categories: List[str] = ["Clear Pronunciation", "Unclear Pronunciation"]
         
         print("ASR service initialized")
     
@@ -151,28 +152,44 @@ class ASRService:
                     tempo_scores = outputs[:, 3:6]
                     pronunciation_scores = outputs[:, 6:8]
                 
-                # Get highest scoring categories
-                fluency_idx = torch.argmax(fluency_scores, dim=1).item()
-                tempo_idx = torch.argmax(tempo_scores, dim=1).item()
-                pronunciation_idx = torch.argmax(pronunciation_scores, dim=1).item()
+                # Get highest scoring categories as Python integers
+                fluency_idx = int(torch.argmax(fluency_scores, dim=1).item())
+                tempo_idx = int(torch.argmax(tempo_scores, dim=1).item())
+                pronunciation_idx = int(torch.argmax(pronunciation_scores, dim=1).item())
                 
                 # Get confidence scores
                 fluency_confidence = torch.softmax(fluency_scores, dim=1)[0, fluency_idx].item()
                 tempo_confidence = torch.softmax(tempo_scores, dim=1)[0, tempo_idx].item()
                 pronunciation_confidence = torch.softmax(pronunciation_scores, dim=1)[0, pronunciation_idx].item()
                 
+                # Bounds checking to ensure indices are valid
+                if fluency_idx >= 0 and fluency_idx < len(self.fluency_categories):
+                    fluency_category = self.fluency_categories[fluency_idx]
+                else:
+                    fluency_category = "Medium Fluency"
+                    
+                if tempo_idx >= 0 and tempo_idx < len(self.tempo_categories):
+                    tempo_category = self.tempo_categories[tempo_idx]
+                else:
+                    tempo_category = "Medium Tempo"
+                    
+                if pronunciation_idx >= 0 and pronunciation_idx < len(self.pronunciation_categories):
+                    pronunciation_category = self.pronunciation_categories[pronunciation_idx]
+                else:
+                    pronunciation_category = "Clear Pronunciation"
+                
                 # Return results
                 return {
                     "fluency": {
-                        "category": self.fluency_categories[fluency_idx],
+                        "category": fluency_category,
                         "confidence": float(fluency_confidence)
                     },
                     "tempo": {
-                        "category": self.tempo_categories[tempo_idx],
+                        "category": tempo_category,
                         "confidence": float(tempo_confidence)
                     },
                     "pronunciation": {
-                        "category": self.pronunciation_categories[pronunciation_idx],
+                        "category": pronunciation_category,
                         "confidence": float(pronunciation_confidence)
                     }
                 }

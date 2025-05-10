@@ -15,7 +15,7 @@ import requests
 import time
 try:
     import torch
-    from transformers import pipeline
+    from transformers.pipelines import pipeline
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     print("Warning: transformers or torch not available. Using fallback approach for Hugging Face API.")
@@ -86,7 +86,7 @@ def initialize_model():
     """Initialize the model with the provided path"""
     global model_service, audio_processor, asr_service
     
-    data = request.json
+    data = request.get_json(silent=True) or {}
     ser_model_path = data.get('model_path', 'models/SER.h5')
     asr_model_path = data.get('asr_model_path', 'models/ASR.pth')
     
@@ -128,6 +128,9 @@ def analyze_audio():
     
     try:
         # Process audio file
+        if audio_processor is None:
+            return jsonify({"status": "error", "message": "Audio processor not initialized"}), 400
+            
         audio_data = audio_processor.process_audio_file(audio_file)
         
         # Check if speech is actually detected in the audio
@@ -159,7 +162,7 @@ def analyze_audio():
         speech_characteristics = {}
         speech_rate = 0
         
-        if asr_service:
+        if asr_service and audio_processor:
             try:
                 # Extract features specifically for ASR
                 asr_features = audio_processor.extract_features_for_asr(audio_data)
@@ -184,7 +187,7 @@ def analyze_audio():
                 print(f"Error in ASR processing: {e}")
         
         # If ASR failed to provide speech rate, fall back to basic calculation
-        if speech_rate == 0:
+        if speech_rate == 0 and audio_processor:
             speech_rate = audio_processor.calculate_speech_rate(audio_data)
             print(f"Using fallback speech rate: {speech_rate}")
         
@@ -218,8 +221,11 @@ def analyze_audio():
 def proxy_huggingface():
     """Proxy requests to Hugging Face to avoid CORS issues"""
     try:
-        data = request.json
-        print("Received proxy request data. Keys:", list(data.keys()))
+        data = request.get_json(silent=True) or {}
+        if data:
+            print("Received proxy request data. Keys:", list(data.keys()))
+        else:
+            print("No JSON data received in request")
         
         # Extract data from the request
         model_id = data.get('model', 'firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3')
@@ -260,37 +266,59 @@ def proxy_huggingface():
                     token=api_key  # Add API key to the pipeline
                 )
                 
-                # Set a timeout for inference to avoid hanging
-                import signal
+                # Windows doesn't support SIGALRM, use threading for timeouts
+                import threading
+                import _thread
                 
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("Model inference timed out")
+                result = None
+                timeout_occurred = False
                 
-                # Set a 25-second timeout
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(25)
+                def run_inference():
+                    nonlocal result
+                    result = classifier(temp_file_path)
+                
+                def timeout_function():
+                    nonlocal timeout_occurred
+                    timeout_occurred = True
+                    _thread.interrupt_main()  # Force interrupt
+                
+                # Start inference in a thread
+                inference_thread = threading.Thread(target=run_inference)
+                inference_thread.daemon = True
+                inference_thread.start()
+                
+                # Start timeout timer
+                timer = threading.Timer(25, timeout_function)
+                timer.start()
                 
                 try:
-                    result = classifier(temp_file_path)
-                    # Cancel the alarm if successful
-                    signal.alarm(0)
-                    print("Pipeline classification result:", result)
+                    # Wait for inference to complete
+                    inference_thread.join(30)  # 30 second hard timeout
+                    timer.cancel()  # Cancel timer if inference completes
                     
-                    # Clean up temp file
-                    try:
-                        os.remove(temp_file_path)
-                    except:
-                        pass
-                    
-                    # Return formatted result to match expected format
-                    return jsonify({
-                        "status": "success",
-                        "result": result
-                    })
-                except TimeoutError as te:
-                    print(f"Pipeline timeout: {str(te)}")
-                    signal.alarm(0)  # Cancel the alarm
-                    raise  # Re-raise to be caught by outer exception handler
+                    if timeout_occurred:
+                        raise TimeoutError("Model inference timed out")
+                        
+                    if result is not None:
+                        print("Pipeline classification result:", result)
+                        
+                        # Clean up temp file
+                        try:
+                            os.remove(temp_file_path)
+                        except:
+                            pass
+                        
+                        # Return formatted result to match expected format
+                        return jsonify({
+                            "status": "success",
+                            "result": result
+                        })
+                    else:
+                        raise Exception("Inference failed to produce a result")
+                        
+                except (KeyboardInterrupt, TimeoutError) as te:
+                    print(f"Pipeline timeout: Inference took too long")
+                    raise TimeoutError("Model inference timed out")
                 
             except Exception as pipeline_error:
                 import traceback
