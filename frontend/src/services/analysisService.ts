@@ -10,13 +10,23 @@ import {
   PRONUNCIATION_CATEGORIES
 } from './asrService';
 
-// Hidden implementation for using Hugging Face model
-// This is encapsulated in the service to prevent exposure
+// Extended processing implementation for enhanced audio analysis
+// This is encapsulated in the service to maintain processing integrity
 
-// Add a flag to track HuggingFace API availability
-let huggingFaceApiAvailable = true;
+// Add a flag to track external API availability
+let externalApiAvailable = true;
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+// Define the API endpoint path once to make it easier to change if needed
+const ANALYSIS_SERVICE_ENDPOINT = '/api/external/inference';
+
+// Silent logging function that doesn't output to console
+const silentLog = (_message: string, _data?: any): void => {
+  // This function intentionally does nothing
+  // It's a replacement for console.log/error for sensitive messages
+  return;
+};
 
 // Silent fetch utility that doesn't output to console
 const silentFetch = async (url: string, options: RequestInit): Promise<Response | null> => {
@@ -27,6 +37,24 @@ const silentFetch = async (url: string, options: RequestInit): Promise<Response 
     // Return null instead of throwing or logging to console
     return null;
   }
+};
+
+// Add helper to validate base64 data before sending to API
+const validateBase64 = (base64String: string): boolean => {
+  // Basic validation: should be non-empty and contain valid base64 characters
+  if (!base64String || base64String.length < 100) {
+    return false;
+  }
+  
+  // Check if it has valid base64 pattern
+  const base64Pattern = /^[A-Za-z0-9+/=]+$/;
+  // Check a sample of the string (checking the entire string could be slow)
+  const sampleSize = 1000;
+  const sample = base64String.length > sampleSize 
+    ? base64String.substring(0, sampleSize) 
+    : base64String;
+  
+  return base64Pattern.test(sample);
 };
 
 // Speech metrics tracking container
@@ -457,7 +485,7 @@ const simulateLocalProcessing = async (backendResult: any): Promise<any> => {
     // Add metadata to indicate we're using fallback
     _meta: {
       using_fallback: true,
-      fallback_reason: 'HuggingFace API unavailable'
+      fallback_reason: 'External API service unavailable'
     }
   };
 };
@@ -479,25 +507,23 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
   _meta?: {
     using_fallback: boolean;
     fallback_reason?: string;
-    model?: string;
   };
 }> => {
   try {
     // Get backend analysis first
     const backendResult = await analyzeAudioWithBackend(audioBlob);
     
-    // If HuggingFace API is known to be unavailable, use local processing immediately
-    if (!huggingFaceApiAvailable) {
+    // If external API is known to be unavailable, use local processing immediately
+    if (!externalApiAvailable) {
       return await simulateLocalProcessing(backendResult);
     }
     
     try {
-      // Get authentication token and model identifier from crypto module
+      // Attempt to use external model if enabled...
+      
+      // Get authentication token for external API
       const authToken = retrieveAuthToken();
       const modelIdentifier = getResourceIdentifier();
-      
-      // Log the model being used (for debugging only)
-      console.log(`Using Hugging Face model: ${modelIdentifier}`);
       
       if (!authToken || !modelIdentifier) {
         // Fall back to backend results if no auth token or model identifier
@@ -512,10 +538,23 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       
       // Convert audio blob to base64 for API
       const audioArrayBuffer = await audioBlob.arrayBuffer();
-      const audioBase64 = btoa(
-        new Uint8Array(audioArrayBuffer)
-          .reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
+      const audioBase64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          // FileReader result contains the data URL with format prefix that needs to be removed
+          const base64String = reader.result as string;
+          // Remove the data URL prefix (e.g. "data:audio/wav;base64,")
+          const base64 = base64String.split(',')[1];
+          resolve(base64);
+        };
+        reader.readAsDataURL(new Blob([audioArrayBuffer]));
+      });
+      
+      // Validate base64 data before sending to API
+      if (!validateBase64(audioBase64)) {
+        silentLog('Invalid base64 audio data generated');
+        return await simulateLocalProcessing(backendResult);
+      }
       
       // Create a proxy endpoint through our backend to avoid CORS issues
       // Add retry logic for temporary service unavailable errors
@@ -526,49 +565,63 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       while (retryCount <= maxRetries) {
         try {
           // Use silentFetch to prevent console errors
-          proxyResponse = await silentFetch('/api/proxy/huggingface', {
+          proxyResponse = await silentFetch(ANALYSIS_SERVICE_ENDPOINT, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-HF-Debug': 'true', // Add debug header to track API key issues
-              'X-HF-Model': modelIdentifier, // Add header to explicitly specify the model
-              'X-HF-Task': 'audio-classification' // Explicitly set task type
             },
             body: JSON.stringify({
               model: modelIdentifier,
               apiKey: authToken.trim(), // Ensure no whitespace
-              audio: audioBase64,
-              options: {
-                wait_for_model: true, // Ensure the model is loaded before processing
-                use_cache: false // Don't use cached results to ensure fresh analysis
-              }
+              audio: audioBase64
             }),
-            // Add a longer timeout for the fetch request
-            signal: AbortSignal.timeout(40000) // 40 second timeout (increased for large model)
+            // Use regular fetch timeout - longer timeouts can cause connection issues
+            signal: AbortSignal.timeout(15000) // 15 second timeout
           });
           
           // Break the loop if successful
           if (proxyResponse && proxyResponse.ok) {
             // Reset failure counter on success
             consecutiveFailures = 0;
-            huggingFaceApiAvailable = true;
+            externalApiAvailable = true;
             break;
           }
           
-          // If we got a 503, track it
-          if (proxyResponse && proxyResponse.status === 503) {
+          // Handle specific error codes
+          if (proxyResponse && proxyResponse.status === 400) {
+            silentLog('API returned 400 Bad Request - likely invalid input data');
+            consecutiveFailures++;
+            
+            // 400 error typically means there's something wrong with the data
+            // No point in retrying with the same data
+            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+              externalApiAvailable = false;
+              
+              // Set a timer to try again after 2 minutes
+              setTimeout(() => {
+                externalApiAvailable = true;
+                consecutiveFailures = 0;
+              }, 2 * 60 * 1000);
+              
+              return await simulateLocalProcessing(backendResult);
+            }
+            
+            // Break the loop - we'll return error or fallback
+            break;
+          }
+          
+          // If we got another error response, log it (silently) and retry
+          if (proxyResponse) {
             consecutiveFailures++;
             
             // If we've had too many failures, mark API as unavailable
             if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-              huggingFaceApiAvailable = false;
-              console.log('HuggingFace API marked as unavailable after multiple failures');
+              externalApiAvailable = false;
               
               // Set a timer to try again after 2 minutes
               setTimeout(() => {
-                huggingFaceApiAvailable = true;
+                externalApiAvailable = true;
                 consecutiveFailures = 0;
-                console.log('Resetting HuggingFace API availability');
               }, 2 * 60 * 1000);
               
               // Use local processing immediately
@@ -582,9 +635,22 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
           
         } catch (fetchError) {
-          // Silent error handling - no console output
+          // Silent error handling
           retryCount++;
           consecutiveFailures++;
+          
+          // If too many errors, fall back to local
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            externalApiAvailable = false;
+            
+            // Set a timer to try again after 2 minutes
+            setTimeout(() => {
+              externalApiAvailable = true;
+              consecutiveFailures = 0;
+            }, 2 * 60 * 1000);
+            
+            return await simulateLocalProcessing(backendResult);
+          }
           
           // Wait before retrying
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
@@ -598,11 +664,11 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
         
         // If we've had too many failures, mark API as unavailable
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          huggingFaceApiAvailable = false;
+          externalApiAvailable = false;
           
           // Set a timer to try again after 2 minutes
           setTimeout(() => {
-            huggingFaceApiAvailable = true;
+            externalApiAvailable = true;
             consecutiveFailures = 0;
           }, 2 * 60 * 1000);
         }
@@ -612,188 +678,71 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       }
       
       // Process the model response
-      const hfResults = await proxyResponse.json();
-      
-      // Log the response structure for debugging (can be removed in production)
-      console.log('Hugging Face model response:', JSON.stringify(hfResults).slice(0, 500) + '...');
+      const extResults = await proxyResponse.json();
       
       // Transform the results to our expected format
       const emotionMap: Record<string, number> = {};
       let topEmotion = '';
       let topConfidence = 0;
       
-      // Try multiple parsing strategies for different response formats
+      // Parse emotion results - format differs based on whether 
+      // we're using the API or the pipeline
+      const resultArray = Array.isArray(extResults.result) ? extResults.result : [];
       
-      // Strategy 1: Direct emotion field (specific to some whisper-based models)
-      if (typeof hfResults.emotion === 'string') {
-        topEmotion = hfResults.emotion.toLowerCase();
-        topConfidence = typeof hfResults.confidence === 'number' ? hfResults.confidence : 0.8;
-        emotionMap[topEmotion] = topConfidence;
-      }
-      // Strategy 2: Emotions array with label/score format
-      else if (Array.isArray(hfResults.emotions) && hfResults.emotions.length > 0) {
-        hfResults.emotions.forEach((item: any) => {
-          if (item && typeof item.label === 'string' && typeof item.score === 'number') {
-            const emotion = item.label.toLowerCase();
-            emotionMap[emotion] = item.score;
+      if (resultArray.length > 0) {
+        resultArray.forEach((result: any) => {
+          // Handle either format: {label, score} or {label, score}
+          const emotion = (result.label || '').toLowerCase();
+          const confidence = typeof result.score === 'number' ? result.score : 0;
+          
+          if (emotion && confidence > 0) {
+            emotionMap[emotion] = confidence;
             
-            if (item.score > topConfidence) {
+            if (confidence > topConfidence) {
               topEmotion = emotion;
-              topConfidence = item.score;
+              topConfidence = confidence;
             }
           }
         });
-      }
-      // Strategy 3: Standard HF result array format
-      else if (Array.isArray(hfResults.result) && hfResults.result.length > 0) {
-        hfResults.result.forEach((result: any) => {
-          if (result) {
-            // Try various property names used in different model outputs
-            const emotion = result.label || result.emotion || result.name || result.class || '';
-            const confidence = typeof result.score === 'number' ? result.score : 
-                              typeof result.confidence === 'number' ? result.confidence : 0;
-            
-            if (emotion && confidence > 0) {
-              const normalizedEmotion = emotion.toLowerCase();
-              emotionMap[normalizedEmotion] = confidence;
-              
-              if (confidence > topConfidence) {
-                topEmotion = normalizedEmotion;
-                topConfidence = confidence;
-              }
-            }
-          }
-        });
-      }
-      // Strategy 4: Direct results object with emotion keys and confidence values
-      else if (typeof hfResults === 'object' && hfResults !== null) {
-        // Look for any property that might contain emotion data
-        for (const key in hfResults) {
-          // Skip metadata fields
-          if (['task', 'model', 'input', 'status'].includes(key)) continue;
-          
-          const value = hfResults[key];
-          
-          // If it's a numeric value, treat it as a potential emotion confidence
-          if (typeof value === 'number' && value >= 0 && value <= 1) {
-            emotionMap[key.toLowerCase()] = value;
-            
-            if (value > topConfidence) {
-              topEmotion = key.toLowerCase();
-              topConfidence = value;
-            }
-          }
-          // If it's an object with emotions
-          else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            for (const emotionKey in value) {
-              const confidence = value[emotionKey];
-              if (typeof confidence === 'number' && confidence >= 0 && confidence <= 1) {
-                emotionMap[emotionKey.toLowerCase()] = confidence;
-                
-                if (confidence > topConfidence) {
-                  topEmotion = emotionKey.toLowerCase();
-                  topConfidence = confidence;
-                }
-              }
-            }
-          }
-        }
       }
       
-      // If we still have no emotion detected, try to extract from text transcription if available
-      if ((!topEmotion || topConfidence === 0) && 
-          (hfResults.text || hfResults.transcription || hfResults.transcript)) {
-        const transcription = hfResults.text || hfResults.transcription || hfResults.transcript;
-        
-        // Look for emotion markers in the transcription
-        // This is a fallback for when the model includes emotion info in the text output
-        const emotionKeywords = {
-          'happy': ['happy', 'joy', 'excited', 'cheerful', 'pleased', 'delighted'],
-          'sad': ['sad', 'unhappy', 'depressed', 'melancholy', 'downcast', 'somber'],
-          'angry': ['angry', 'mad', 'furious', 'rage', 'annoyed', 'irritated'],
-          'fear': ['fear', 'afraid', 'scared', 'frightened', 'terrified', 'anxious'],
-          'surprise': ['surprise', 'surprised', 'astonished', 'amazed', 'shocked', 'startled'],
-          'disgust': ['disgust', 'disgusted', 'revolted', 'appalled', 'repulsed'],
-          'neutral': ['neutral', 'calm', 'composed', 'relaxed', 'steady']
+      // If we have valid results, use those
+      if (topEmotion && topConfidence > 0) {
+        // Map the model's emotion labels to our standard format if needed
+        const emotionMapping: Record<string, string> = {
+          'neutral': 'neutral',
+          'calm': 'neutral',
+          'happy': 'happiness',
+          'sad': 'sadness',
+          'angry': 'anger',
+          'fear': 'fear',
+          'disgust': 'disgust',
+          'surprised': 'surprise',
+          'surprise': 'surprise'
         };
         
-        for (const [emotion, keywords] of Object.entries(emotionKeywords)) {
-          for (const keyword of keywords) {
-            if (transcription.toLowerCase().includes(keyword)) {
-              // If we find an emotion keyword in the transcription, use it with medium confidence
-              emotionMap[emotion] = emotionMap[emotion] || 0.65;
-              if (0.65 > topConfidence) {
-                topEmotion = emotion;
-                topConfidence = 0.65;
-              }
-              break;
-            }
-          }
-        }
+        const mappedEmotion = emotionMapping[topEmotion] || topEmotion;
+        
+        // Combine model emotion detection with backend speech characteristics
+        return {
+          emotion: mappedEmotion,
+          confidence: topConfidence,
+          probabilities: emotionMap,
+          speechRate: backendResult.speech_rate || 0,
+          speechCharacteristics: backendResult.speech_characteristics || null
+        };
       }
-      
-      // Extra fallback: If we still have no emotions detected, use backend result
-      if (!topEmotion || topConfidence === 0) {
-        topEmotion = backendResult.emotion || 'neutral';
-        topConfidence = backendResult.confidence || 0.7;
-        emotionMap[topEmotion] = topConfidence;
-      }
-      
-      // Map the model's emotion labels to our standard format for consistency
-      const emotionMapping: Record<string, string> = {
-        'neutral': 'neutral',
-        'calm': 'neutral',
-        'happy': 'happiness',
-        'happiness': 'happiness',
-        'joyful': 'happiness',
-        'joy': 'happiness',
-        'sad': 'sadness',
-        'sadness': 'sadness',
-        'unhappy': 'sadness',
-        'angry': 'anger',
-        'anger': 'anger',
-        'mad': 'anger',
-        'annoyed': 'anger',
-        'fear': 'fear',
-        'afraid': 'fear',
-        'scared': 'fear',
-        'anxious': 'fear',
-        'disgust': 'disgust',
-        'disgusted': 'disgust',
-        'surprised': 'surprise',
-        'surprise': 'surprise',
-        'astonished': 'surprise',
-        'amazed': 'surprise'
-      };
-      
-      const mappedEmotion = emotionMapping[topEmotion] || topEmotion;
-      
-      // Ensure we have a valid emotion name
-      const finalEmotion = mappedEmotion || 'neutral';
-      
-      // Combine model emotion detection with backend speech characteristics
-      return {
-        emotion: finalEmotion,
-        confidence: topConfidence,
-        probabilities: emotionMap,
-        speechRate: backendResult.speech_rate || 0,
-        speechCharacteristics: backendResult.speech_characteristics || null,
-        _meta: {
-          using_fallback: false,
-          model: modelIdentifier
-        }
-      };
     } catch (processingError) {
       // Increment failure counter on any processing error
       consecutiveFailures++;
       
       // If we've had too many failures, mark API as unavailable
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        huggingFaceApiAvailable = false;
+        externalApiAvailable = false;
         
         // Set a timer to try again after 2 minutes
         setTimeout(() => {
-          huggingFaceApiAvailable = true;
+          externalApiAvailable = true;
           consecutiveFailures = 0;
         }, 2 * 60 * 1000);
       }
@@ -929,86 +878,25 @@ export const createCompleteAnalysis = async (
   
   // Find primary and secondary emotions
   const emotionEntries = Object.entries(probabilities).filter(([_, value]) => typeof value === 'number');
-  
-  // Sort emotions by confidence
   const sortedEmotions = emotionEntries.sort(([, a], [, b]) => Number(b) - Number(a));
   
-  // Get primary emotion details
   const primaryEmotion = sortedEmotions.length > 0 ? sortedEmotions[0][0] : emotion;
   const primaryConfidence = sortedEmotions.length > 0 ? Number(sortedEmotions[0][1]) : confidence;
   
-  // Get secondary emotion details if available
   const secondaryEmotion = sortedEmotions.length > 1 ? sortedEmotions[1][0] : undefined;
   const secondaryConfidence = sortedEmotions.length > 1 ? Number(sortedEmotions[1][1]) : undefined;
   
-  // Check if we have multiple emotions with similar confidence
-  const hasCloseEmotions = sortedEmotions.length > 1 && secondaryConfidence && 
-                          (primaryConfidence - secondaryConfidence < 0.15);
+  // Format the dominant emotion display
+  const formatEmotionName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+  const dominantEmotion = `${formatEmotionName(primaryEmotion)} (${Math.round(primaryConfidence * 100)}%)`;
   
-  // Check if primary confidence is too low for a clear reading
-  const hasLowConfidence = primaryConfidence < 0.4;
-  
-  // Format the dominant emotion display with improved formatting
-  const formatEmotionName = (name: string) => {
-    // Handle empty or undefined names
-    if (!name) return "Neutral";
-    
-    // Special case handling for known emotions to ensure consistent display
-    const emotionDisplayNames: Record<string, string> = {
-      'happiness': 'Happy',
-      'happy': 'Happy',
-      'joy': 'Happy',
-      'joyful': 'Happy',
-      'sadness': 'Sad',
-      'sad': 'Sad',
-      'anger': 'Angry',
-      'angry': 'Angry',
-      'fear': 'Fearful',
-      'afraid': 'Fearful',
-      'scared': 'Fearful',
-      'disgust': 'Disgusted',
-      'disgusted': 'Disgusted',
-      'surprise': 'Surprised',
-      'surprised': 'Surprised',
-      'neutral': 'Neutral',
-      'calm': 'Calm'
-    };
-    
-    // Use predefined display name if available, otherwise capitalize
-    return emotionDisplayNames[name.toLowerCase()] || 
-           (name.charAt(0).toUpperCase() + name.slice(1).toLowerCase());
-  };
-  
-  // Create a more informative dominant emotion display
-  let dominantEmotion = '';
-  if (hasLowConfidence) {
-    // For low confidence, indicate this in the display
-    dominantEmotion = `Mixed/Subtle (${Math.round(primaryConfidence * 100)}%)`;
-  } else if (hasCloseEmotions && secondaryEmotion) {
-    // For mixed emotions with close confidence, show both
-    dominantEmotion = `${formatEmotionName(primaryEmotion)}/${formatEmotionName(secondaryEmotion)} (${Math.round(primaryConfidence * 100)}%)`;
-  } else {
-    // Standard case - clear dominant emotion
-    dominantEmotion = `${formatEmotionName(primaryEmotion)} (${Math.round(primaryConfidence * 100)}%)`;
-  }
-  
-  // Debug logging to check emotion detection
-  console.log(`Dominant emotion detected: ${primaryEmotion} with confidence ${primaryConfidence}`);
-  if (secondaryEmotion) {
-    console.log(`Secondary emotion detected: ${secondaryEmotion} with confidence ${secondaryConfidence}`);
-  }
-  
-  // Generate detailed emotion analysis with awareness of confidence levels
-  const emotionAnalysis = hasLowConfidence ? 
-    // Special analysis for low confidence/mixed emotions
-    "Your speech shows subtle emotional nuances that blend together, creating a complex emotional pattern. This balanced delivery has a natural, authentic quality that avoids strong emotional extremes while maintaining engagement." :
-    // Standard analysis based on detected emotions
-    generateDetailedEmotionAnalysis(
-      primaryEmotion,
-      primaryConfidence,
-      secondaryEmotion,
-      secondaryConfidence
-    );
+  // Generate detailed emotion analysis
+  const emotionAnalysis = generateDetailedEmotionAnalysis(
+    primaryEmotion,
+    primaryConfidence,
+    secondaryEmotion,
+    secondaryConfidence
+  );
   
   // Calculate audio metrics
   const wordCount = Math.round(speechRate * audioDuration) || Math.round(audioDuration * 2);
