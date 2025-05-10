@@ -91,6 +91,12 @@ def load_model():
 def process_audio(audio_data, sample_rate):
     """Process audio data and extract features"""
     try:
+        global device
+        
+        # Ensure device is initialized
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         # Resample if needed
         if sample_rate != ASRConfig.SAMPLE_RATE:
             audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=ASRConfig.SAMPLE_RATE)
@@ -127,9 +133,19 @@ def process_audio(audio_data, sample_rate):
 def analyze_speech(audio_data, sample_rate, boost_sensitivity=False):
     """Analyze speech using the ASR model"""
     try:
+        global asr_model, device
+        
+        # Ensure model is loaded
         if asr_model is None:
-            load_model()
-            
+            if not load_model():
+                logger.error("Failed to load ASR model")
+                return None
+                
+        # Double check to make sure model was loaded properly
+        if asr_model is None:
+            logger.error("ASR model is still None after loading attempt")
+            return None
+        
         # Process audio to extract features
         features = process_audio(audio_data, sample_rate)
         
