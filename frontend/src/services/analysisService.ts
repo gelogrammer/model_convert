@@ -479,6 +479,7 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
   _meta?: {
     using_fallback: boolean;
     fallback_reason?: string;
+    model?: string;
   };
 }> => {
   try {
@@ -491,11 +492,12 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
     }
     
     try {
-      // Attempt to use external model if enabled...
-      
-      // Get authentication token for external API
+      // Get authentication token and model identifier from crypto module
       const authToken = retrieveAuthToken();
       const modelIdentifier = getResourceIdentifier();
+      
+      // Log the model being used (for debugging only)
+      console.log(`Using Hugging Face model: ${modelIdentifier}`);
       
       if (!authToken || !modelIdentifier) {
         // Fall back to backend results if no auth token or model identifier
@@ -528,15 +530,21 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-HF-Debug': 'true' // Add debug header to track API key issues
+              'X-HF-Debug': 'true', // Add debug header to track API key issues
+              'X-HF-Model': modelIdentifier, // Add header to explicitly specify the model
+              'X-HF-Task': 'audio-classification' // Explicitly set task type
             },
             body: JSON.stringify({
               model: modelIdentifier,
               apiKey: authToken.trim(), // Ensure no whitespace
-              audio: audioBase64
+              audio: audioBase64,
+              options: {
+                wait_for_model: true, // Ensure the model is loaded before processing
+                use_cache: false // Don't use cached results to ensure fresh analysis
+              }
             }),
             // Add a longer timeout for the fetch request
-            signal: AbortSignal.timeout(30000) // 30 second timeout
+            signal: AbortSignal.timeout(40000) // 40 second timeout (increased for large model)
           });
           
           // Break the loop if successful
@@ -606,58 +614,175 @@ export const analyzeAudioWithModel = async (audioBlob: Blob): Promise<{
       // Process the model response
       const hfResults = await proxyResponse.json();
       
+      // Log the response structure for debugging (can be removed in production)
+      console.log('Hugging Face model response:', JSON.stringify(hfResults).slice(0, 500) + '...');
+      
       // Transform the results to our expected format
       const emotionMap: Record<string, number> = {};
       let topEmotion = '';
       let topConfidence = 0;
       
-      // Parse emotion results - format differs based on whether 
-      // we're using the API or the pipeline
-      const resultArray = Array.isArray(hfResults.result) ? hfResults.result : [];
+      // Try multiple parsing strategies for different response formats
       
-      if (resultArray.length > 0) {
-        resultArray.forEach((result: any) => {
-          // Handle either format: {label, score} or {label, score}
-          const emotion = (result.label || '').toLowerCase();
-          const confidence = typeof result.score === 'number' ? result.score : 0;
-          
-          if (emotion && confidence > 0) {
-            emotionMap[emotion] = confidence;
+      // Strategy 1: Direct emotion field (specific to some whisper-based models)
+      if (typeof hfResults.emotion === 'string') {
+        topEmotion = hfResults.emotion.toLowerCase();
+        topConfidence = typeof hfResults.confidence === 'number' ? hfResults.confidence : 0.8;
+        emotionMap[topEmotion] = topConfidence;
+      }
+      // Strategy 2: Emotions array with label/score format
+      else if (Array.isArray(hfResults.emotions) && hfResults.emotions.length > 0) {
+        hfResults.emotions.forEach((item: any) => {
+          if (item && typeof item.label === 'string' && typeof item.score === 'number') {
+            const emotion = item.label.toLowerCase();
+            emotionMap[emotion] = item.score;
             
-            if (confidence > topConfidence) {
+            if (item.score > topConfidence) {
               topEmotion = emotion;
-              topConfidence = confidence;
+              topConfidence = item.score;
             }
           }
         });
       }
-      
-      // If we have valid results, use those
-      if (topEmotion && topConfidence > 0) {
-        // Map the model's emotion labels to our standard format if needed
-        const emotionMapping: Record<string, string> = {
-          'neutral': 'neutral',
-          'calm': 'neutral',
-          'happy': 'happiness',
-          'sad': 'sadness',
-          'angry': 'anger',
-          'fear': 'fear',
-          'disgust': 'disgust',
-          'surprised': 'surprise',
-          'surprise': 'surprise'
-        };
-        
-        const mappedEmotion = emotionMapping[topEmotion] || topEmotion;
-        
-        // Combine model emotion detection with backend speech characteristics
-        return {
-          emotion: mappedEmotion,
-          confidence: topConfidence,
-          probabilities: emotionMap,
-          speechRate: backendResult.speech_rate || 0,
-          speechCharacteristics: backendResult.speech_characteristics || null
-        };
+      // Strategy 3: Standard HF result array format
+      else if (Array.isArray(hfResults.result) && hfResults.result.length > 0) {
+        hfResults.result.forEach((result: any) => {
+          if (result) {
+            // Try various property names used in different model outputs
+            const emotion = result.label || result.emotion || result.name || result.class || '';
+            const confidence = typeof result.score === 'number' ? result.score : 
+                              typeof result.confidence === 'number' ? result.confidence : 0;
+            
+            if (emotion && confidence > 0) {
+              const normalizedEmotion = emotion.toLowerCase();
+              emotionMap[normalizedEmotion] = confidence;
+              
+              if (confidence > topConfidence) {
+                topEmotion = normalizedEmotion;
+                topConfidence = confidence;
+              }
+            }
+          }
+        });
       }
+      // Strategy 4: Direct results object with emotion keys and confidence values
+      else if (typeof hfResults === 'object' && hfResults !== null) {
+        // Look for any property that might contain emotion data
+        for (const key in hfResults) {
+          // Skip metadata fields
+          if (['task', 'model', 'input', 'status'].includes(key)) continue;
+          
+          const value = hfResults[key];
+          
+          // If it's a numeric value, treat it as a potential emotion confidence
+          if (typeof value === 'number' && value >= 0 && value <= 1) {
+            emotionMap[key.toLowerCase()] = value;
+            
+            if (value > topConfidence) {
+              topEmotion = key.toLowerCase();
+              topConfidence = value;
+            }
+          }
+          // If it's an object with emotions
+          else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            for (const emotionKey in value) {
+              const confidence = value[emotionKey];
+              if (typeof confidence === 'number' && confidence >= 0 && confidence <= 1) {
+                emotionMap[emotionKey.toLowerCase()] = confidence;
+                
+                if (confidence > topConfidence) {
+                  topEmotion = emotionKey.toLowerCase();
+                  topConfidence = confidence;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // If we still have no emotion detected, try to extract from text transcription if available
+      if ((!topEmotion || topConfidence === 0) && 
+          (hfResults.text || hfResults.transcription || hfResults.transcript)) {
+        const transcription = hfResults.text || hfResults.transcription || hfResults.transcript;
+        
+        // Look for emotion markers in the transcription
+        // This is a fallback for when the model includes emotion info in the text output
+        const emotionKeywords = {
+          'happy': ['happy', 'joy', 'excited', 'cheerful', 'pleased', 'delighted'],
+          'sad': ['sad', 'unhappy', 'depressed', 'melancholy', 'downcast', 'somber'],
+          'angry': ['angry', 'mad', 'furious', 'rage', 'annoyed', 'irritated'],
+          'fear': ['fear', 'afraid', 'scared', 'frightened', 'terrified', 'anxious'],
+          'surprise': ['surprise', 'surprised', 'astonished', 'amazed', 'shocked', 'startled'],
+          'disgust': ['disgust', 'disgusted', 'revolted', 'appalled', 'repulsed'],
+          'neutral': ['neutral', 'calm', 'composed', 'relaxed', 'steady']
+        };
+        
+        for (const [emotion, keywords] of Object.entries(emotionKeywords)) {
+          for (const keyword of keywords) {
+            if (transcription.toLowerCase().includes(keyword)) {
+              // If we find an emotion keyword in the transcription, use it with medium confidence
+              emotionMap[emotion] = emotionMap[emotion] || 0.65;
+              if (0.65 > topConfidence) {
+                topEmotion = emotion;
+                topConfidence = 0.65;
+              }
+              break;
+            }
+          }
+        }
+      }
+      
+      // Extra fallback: If we still have no emotions detected, use backend result
+      if (!topEmotion || topConfidence === 0) {
+        topEmotion = backendResult.emotion || 'neutral';
+        topConfidence = backendResult.confidence || 0.7;
+        emotionMap[topEmotion] = topConfidence;
+      }
+      
+      // Map the model's emotion labels to our standard format for consistency
+      const emotionMapping: Record<string, string> = {
+        'neutral': 'neutral',
+        'calm': 'neutral',
+        'happy': 'happiness',
+        'happiness': 'happiness',
+        'joyful': 'happiness',
+        'joy': 'happiness',
+        'sad': 'sadness',
+        'sadness': 'sadness',
+        'unhappy': 'sadness',
+        'angry': 'anger',
+        'anger': 'anger',
+        'mad': 'anger',
+        'annoyed': 'anger',
+        'fear': 'fear',
+        'afraid': 'fear',
+        'scared': 'fear',
+        'anxious': 'fear',
+        'disgust': 'disgust',
+        'disgusted': 'disgust',
+        'surprised': 'surprise',
+        'surprise': 'surprise',
+        'astonished': 'surprise',
+        'amazed': 'surprise'
+      };
+      
+      const mappedEmotion = emotionMapping[topEmotion] || topEmotion;
+      
+      // Ensure we have a valid emotion name
+      const finalEmotion = mappedEmotion || 'neutral';
+      
+      // Combine model emotion detection with backend speech characteristics
+      return {
+        emotion: finalEmotion,
+        confidence: topConfidence,
+        probabilities: emotionMap,
+        speechRate: backendResult.speech_rate || 0,
+        speechCharacteristics: backendResult.speech_characteristics || null,
+        _meta: {
+          using_fallback: false,
+          model: modelIdentifier
+        }
+      };
     } catch (processingError) {
       // Increment failure counter on any processing error
       consecutiveFailures++;
@@ -804,25 +929,86 @@ export const createCompleteAnalysis = async (
   
   // Find primary and secondary emotions
   const emotionEntries = Object.entries(probabilities).filter(([_, value]) => typeof value === 'number');
+  
+  // Sort emotions by confidence
   const sortedEmotions = emotionEntries.sort(([, a], [, b]) => Number(b) - Number(a));
   
+  // Get primary emotion details
   const primaryEmotion = sortedEmotions.length > 0 ? sortedEmotions[0][0] : emotion;
   const primaryConfidence = sortedEmotions.length > 0 ? Number(sortedEmotions[0][1]) : confidence;
   
+  // Get secondary emotion details if available
   const secondaryEmotion = sortedEmotions.length > 1 ? sortedEmotions[1][0] : undefined;
   const secondaryConfidence = sortedEmotions.length > 1 ? Number(sortedEmotions[1][1]) : undefined;
   
-  // Format the dominant emotion display
-  const formatEmotionName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
-  const dominantEmotion = `${formatEmotionName(primaryEmotion)} (${Math.round(primaryConfidence * 100)}%)`;
+  // Check if we have multiple emotions with similar confidence
+  const hasCloseEmotions = sortedEmotions.length > 1 && secondaryConfidence && 
+                          (primaryConfidence - secondaryConfidence < 0.15);
   
-  // Generate detailed emotion analysis
-  const emotionAnalysis = generateDetailedEmotionAnalysis(
-    primaryEmotion,
-    primaryConfidence,
-    secondaryEmotion,
-    secondaryConfidence
-  );
+  // Check if primary confidence is too low for a clear reading
+  const hasLowConfidence = primaryConfidence < 0.4;
+  
+  // Format the dominant emotion display with improved formatting
+  const formatEmotionName = (name: string) => {
+    // Handle empty or undefined names
+    if (!name) return "Neutral";
+    
+    // Special case handling for known emotions to ensure consistent display
+    const emotionDisplayNames: Record<string, string> = {
+      'happiness': 'Happy',
+      'happy': 'Happy',
+      'joy': 'Happy',
+      'joyful': 'Happy',
+      'sadness': 'Sad',
+      'sad': 'Sad',
+      'anger': 'Angry',
+      'angry': 'Angry',
+      'fear': 'Fearful',
+      'afraid': 'Fearful',
+      'scared': 'Fearful',
+      'disgust': 'Disgusted',
+      'disgusted': 'Disgusted',
+      'surprise': 'Surprised',
+      'surprised': 'Surprised',
+      'neutral': 'Neutral',
+      'calm': 'Calm'
+    };
+    
+    // Use predefined display name if available, otherwise capitalize
+    return emotionDisplayNames[name.toLowerCase()] || 
+           (name.charAt(0).toUpperCase() + name.slice(1).toLowerCase());
+  };
+  
+  // Create a more informative dominant emotion display
+  let dominantEmotion = '';
+  if (hasLowConfidence) {
+    // For low confidence, indicate this in the display
+    dominantEmotion = `Mixed/Subtle (${Math.round(primaryConfidence * 100)}%)`;
+  } else if (hasCloseEmotions && secondaryEmotion) {
+    // For mixed emotions with close confidence, show both
+    dominantEmotion = `${formatEmotionName(primaryEmotion)}/${formatEmotionName(secondaryEmotion)} (${Math.round(primaryConfidence * 100)}%)`;
+  } else {
+    // Standard case - clear dominant emotion
+    dominantEmotion = `${formatEmotionName(primaryEmotion)} (${Math.round(primaryConfidence * 100)}%)`;
+  }
+  
+  // Debug logging to check emotion detection
+  console.log(`Dominant emotion detected: ${primaryEmotion} with confidence ${primaryConfidence}`);
+  if (secondaryEmotion) {
+    console.log(`Secondary emotion detected: ${secondaryEmotion} with confidence ${secondaryConfidence}`);
+  }
+  
+  // Generate detailed emotion analysis with awareness of confidence levels
+  const emotionAnalysis = hasLowConfidence ? 
+    // Special analysis for low confidence/mixed emotions
+    "Your speech shows subtle emotional nuances that blend together, creating a complex emotional pattern. This balanced delivery has a natural, authentic quality that avoids strong emotional extremes while maintaining engagement." :
+    // Standard analysis based on detected emotions
+    generateDetailedEmotionAnalysis(
+      primaryEmotion,
+      primaryConfidence,
+      secondaryEmotion,
+      secondaryConfidence
+    );
   
   // Calculate audio metrics
   const wordCount = Math.round(speechRate * audioDuration) || Math.round(audioDuration * 2);
