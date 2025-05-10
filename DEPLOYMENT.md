@@ -71,10 +71,10 @@ This guide will walk you through deploying:
 4. Configure your web service:
    - **Name**: Choose a name (e.g., model-convert-backend)
    - **Root Directory**: `backend`
-   - **Runtime**: Python 3
+   - **Runtime**: Python 3.10 (recommended for best compatibility)
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `gunicorn app:app --timeout 120 --worker-class eventlet`
-   - **Instance Type**: Free (or select paid options for better performance)
+   - **Instance Type**: Standard (512 MB RAM recommended as the free tier may have insufficient memory for ML models)
 
 5. Add environment variables:
    - Click on "Environment" tab
@@ -85,36 +85,39 @@ This guide will walk you through deploying:
      VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6dHN0cm1jY2F2eHJnY2N2bWpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5MzExNDEsImV4cCI6MjA2MTUwNzE0MX0.a3fTAAaTip_DenzWBWBoTjRD-ARiZRdXqmwE7Rgz6Yg
      VITE_HUGGINGFACE_API_KEY=your_huggingface_api_key
      PORT=10000
-     PYTHON_VERSION=3.10.13  # If not using runtime.txt
      ```
 
-6. Click "Create Web Service"
-7. Wait for the deployment to complete (this may take several minutes)
-8. Once deployed, note your service URL (e.g., https://model-convert-backend.onrender.com)
+6. Advanced options:
+   - Under "Advanced" settings, increase the **Health Check Path** timeout if your service takes time to start
+   - Consider enabling "Auto-Deploy" for automatic deployments when you push to your repository
 
-### 3. Troubleshooting Backend Deployment
+7. For larger models and deployments:
+   - Consider upgrading to a paid plan for more resources
+   - Enable persistent disk for storing uploaded files and model data
 
-- **Python Version Conflicts**: If you see errors about package compatibility with Python 3.11, either:
-  - Use the `runtime.txt` approach to specify Python 3.10
-  - Or update your requirements.txt to use newer package versions compatible with Python 3.11
+8. Click "Create Web Service"
+9. Wait for the deployment to complete (this may take several minutes)
+10. Once deployed, note your service URL (e.g., https://model-convert-backend.onrender.com)
+11. Test your deployment by visiting `https://your-service-name.onrender.com/api/health`
 
-- **Memory Issues**: If you encounter memory errors, consider upgrading to a paid plan on Render
+### Dealing with Common Render Deployment Issues:
 
-- **TensorFlow Installation Errors**: If TensorFlow fails to install, try updating to:
-  ```
-  tensorflow-cpu>=2.15.0  # Smaller install for deployment environments
-  ```
+1. **Package Incompatibility**: If you see errors with package versions:
+   - Use the fixed requirements.txt with werkzeug==2.0.3 for Flask 2.0.1
+   - Or use the alternative requirements with Flask 2.2.3
 
-- **Deployment Timeouts**: Machine learning models can take time to load. Add the `--timeout` flag to gunicorn command:
-  ```
-  gunicorn app:app --timeout 120 --worker-class eventlet
-  ```
+2. **TensorFlow Issues**: If TensorFlow fails to install or load:
+   - Replace `tensorflow>=2.15.0` with `tensorflow-cpu>=2.15.0` in requirements.txt
+   - On free tier, consider using TensorFlow Lite or Hugging Face API as alternatives
 
-- **Socket.IO Issues**: Ensure your Socket.IO configuration in app.py supports your production domain and is using the correct worker class (eventlet)
+3. **Memory Limitations**: If your app crashes due to memory limits:
+   - Upgrade to a paid plan with more RAM (at least 512MB recommended)
+   - Optimize model loading to reduce memory usage
+   - Use model quantization techniques to reduce model size
 
-- **Missing Models**: If your models are too large for Git, consider:
-  - Using Hugging Face model loading in your code instead of local files
-  - Setting up a separate storage solution (S3, etc.) and downloading models during startup
+4. **Slow Cold Starts**: The free tier sleeps after inactivity
+   - Set up a ping service to keep your service active
+   - Implement lazy loading for models to improve startup time
 
 ## Part 2: Frontend Deployment to Cloudflare Pages
 
