@@ -1,0 +1,248 @@
+# Deployment Guide: Model Conversion App
+
+This guide will walk you through deploying:
+1. Backend to Render
+2. Frontend to Cloudflare Pages
+
+## Prerequisites
+
+- Git repository with your code
+- Render account (https://render.com)
+- Cloudflare account (https://dash.cloudflare.com/sign-up)
+- Hugging Face API key
+
+## Part 1: Backend Deployment to Render
+
+### 1. Prepare your backend
+
+1. Make sure your `backend/.env` file contains all necessary environment variables:
+   ```
+   VITE_BACKEND_URL=https://your-render-service-name.onrender.com
+   VITE_SUPABASE_URL=https://pztstrmccavxrgccvmjq.supabase.co
+   VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6dHN0cm1jY2F2eHJnY2N2bWpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5MzExNDEsImV4cCI6MjA2MTUwNzE0MX0.a3fTAAaTip_DenzWBWBoTjRD-ARiZRdXqmwE7Rgz6Yg
+   VITE_HUGGINGFACE_API_KEY=your_huggingface_api_key
+   ```
+
+2. Update your `requirements.txt` for Python 3.11 compatibility:
+   - Open `backend/requirements.txt`
+   - Update NumPy version: Change `numpy==1.21.2` to `numpy>=1.26.0`
+   - Update TensorFlow version: Change `tensorflow==2.15.0` to `tensorflow>=2.15.0`
+   - Update other packages if needed to ensure compatibility with Python 3.11
+
+   Sample updated requirements.txt:
+   ```
+   flask==2.0.1
+   flask-cors==3.0.10
+   flask-socketio==5.3.6
+   numpy>=1.26.0
+   tensorflow>=2.15.0
+   librosa>=0.8.1
+   matplotlib>=3.7.2
+   python-engineio==4.8.0
+   python-socketio==5.10.0
+   eventlet==0.33.3
+   torch>=1.9.1
+   requests==2.31.0
+   transformers>=4.38.0
+   soundfile==0.10.3.post1
+   scipy>=1.7.1
+   python-dotenv==0.19.0
+   gunicorn==20.1.0
+   ```
+
+3. Alternatively, specify Python 3.10 in a `runtime.txt` file:
+   ```
+   python-3.10.13
+   ```
+
+4. Ensure you have `Procfile` in the backend directory with:
+   ```
+   web: gunicorn app:app --timeout 120
+   ```
+   Note: The increased timeout helps with model loading.
+
+5. Push all changes to your Git repository
+
+### 2. Deploy to Render
+
+1. Create a new Render account or log in at https://render.com
+2. Click "New +" and select "Web Service"
+3. Connect your GitHub/GitLab repository
+4. Configure your web service:
+   - **Name**: Choose a name (e.g., model-convert-backend)
+   - **Root Directory**: `backend`
+   - **Runtime**: Python 3
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `gunicorn app:app --timeout 120 --worker-class eventlet`
+   - **Instance Type**: Free (or select paid options for better performance)
+
+5. Add environment variables:
+   - Click on "Environment" tab
+   - Add the following variables:
+     ```
+     VITE_BACKEND_URL=https://your-render-service-name.onrender.com
+     VITE_SUPABASE_URL=https://pztstrmccavxrgccvmjq.supabase.co
+     VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6dHN0cm1jY2F2eHJnY2N2bWpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5MzExNDEsImV4cCI6MjA2MTUwNzE0MX0.a3fTAAaTip_DenzWBWBoTjRD-ARiZRdXqmwE7Rgz6Yg
+     VITE_HUGGINGFACE_API_KEY=your_huggingface_api_key
+     PORT=10000
+     PYTHON_VERSION=3.10.13  # If not using runtime.txt
+     ```
+
+6. Click "Create Web Service"
+7. Wait for the deployment to complete (this may take several minutes)
+8. Once deployed, note your service URL (e.g., https://model-convert-backend.onrender.com)
+
+### 3. Troubleshooting Backend Deployment
+
+- **Python Version Conflicts**: If you see errors about package compatibility with Python 3.11, either:
+  - Use the `runtime.txt` approach to specify Python 3.10
+  - Or update your requirements.txt to use newer package versions compatible with Python 3.11
+
+- **Memory Issues**: If you encounter memory errors, consider upgrading to a paid plan on Render
+
+- **TensorFlow Installation Errors**: If TensorFlow fails to install, try updating to:
+  ```
+  tensorflow-cpu>=2.15.0  # Smaller install for deployment environments
+  ```
+
+- **Deployment Timeouts**: Machine learning models can take time to load. Add the `--timeout` flag to gunicorn command:
+  ```
+  gunicorn app:app --timeout 120 --worker-class eventlet
+  ```
+
+- **Socket.IO Issues**: Ensure your Socket.IO configuration in app.py supports your production domain and is using the correct worker class (eventlet)
+
+- **Missing Models**: If your models are too large for Git, consider:
+  - Using Hugging Face model loading in your code instead of local files
+  - Setting up a separate storage solution (S3, etc.) and downloading models during startup
+
+## Part 2: Frontend Deployment to Cloudflare Pages
+
+### 1. Prepare your frontend
+
+1. Update `frontend/.env` with your production backend URL:
+   ```
+   VITE_BACKEND_URL=https://your-render-service-name.onrender.com
+   VITE_SUPABASE_URL=https://pztstrmccavxrgccvmjq.supabase.co
+   VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6dHN0cm1jY2F2eHJnY2N2bWpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5MzExNDEsImV4cCI6MjA2MTUwNzE0MX0.a3fTAAaTip_DenzWBWBoTjRD-ARiZRdXqmwE7Rgz6Yg
+   VITE_HUGGINGFACE_API_KEY=your_huggingface_api_key
+   ```
+
+2. Create a `.env.production` file in the frontend directory with the same content
+3. Test your build locally:
+   ```bash
+   cd frontend
+   npm run build
+   ```
+4. Commit and push your changes to your repository
+
+### 2. Deploy to Cloudflare Pages
+
+1. Sign up for or log in to Cloudflare (https://dash.cloudflare.com/)
+2. Go to "Pages" from the dashboard
+3. Click "Create a project" and select "Connect to Git"
+4. Connect your GitHub/GitLab repository
+5. Configure your build:
+   - **Project name**: Choose a name (e.g., model-convert)
+   - **Production branch**: main (or your default branch)
+   - **Framework preset**: Vite
+   - **Build command**: npm run build
+   - **Build output directory**: dist
+   - **Root directory**: frontend
+
+6. Add environment variables:
+   - Click "Environment variables"
+   - Add the same variables as in your `.env` file:
+     ```
+     VITE_BACKEND_URL=https://your-render-service-name.onrender.com
+     VITE_SUPABASE_URL=https://pztstrmccavxrgccvmjq.supabase.co
+     VITE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6dHN0cm1jY2F2eHJnY2N2bWpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU5MzExNDEsImV4cCI6MjA2MTUwNzE0MX0.a3fTAAaTip_DenzWBWBoTjRD-ARiZRdXqmwE7Rgz6Yg
+     VITE_HUGGINGFACE_API_KEY=your_huggingface_api_key
+     ```
+
+7. Click "Save and Deploy"
+8. Wait for the deployment to complete
+9. Once deployed, your app will be accessible at `https://your-project-name.pages.dev`
+
+### 3. Troubleshooting Frontend Deployment
+
+- **Build Failures**: If your build fails, check build logs for specific errors
+- **CORS Issues**: Ensure your backend allows requests from your Cloudflare domain
+- **Environment Variables**: Verify environment variables are properly set in Cloudflare
+- **Socket.IO Connection**: If using Socket.IO, ensure your frontend connects to the correct backend URL
+
+## Part 3: Configure CORS and Custom Domain (Optional)
+
+### 1. Update Backend CORS Settings
+
+Modify your backend/app.py file to allow your Cloudflare domain:
+
+```python
+# Configure CORS
+CORS(app, origins=[
+    "https://your-project-name.pages.dev",
+    "https://your-custom-domain.com"  # If you have a custom domain
+])
+
+# Configure Socket.IO
+socketio = SocketIO(app, cors_allowed_origins=[
+    "https://your-project-name.pages.dev", 
+    "https://your-custom-domain.com"  # If you have a custom domain
+], async_mode='eventlet')
+```
+
+### 2. Set Up Custom Domain (Optional)
+
+#### For Cloudflare Pages:
+1. Go to your Pages project
+2. Click on "Custom domains"
+3. Follow the instructions to add your domain
+
+#### For Render:
+1. Go to your Web Service
+2. Click on "Settings"
+3. Go to "Custom Domains"
+4. Follow the instructions to add your domain
+
+## Part 4: Additional Considerations
+
+### 1. Monitor Resources on Render
+
+The free tier of Render has limitations. Monitor your usage to ensure:
+- You don't exceed CPU/memory limits
+- Service doesn't "spin down" when inactive (paid plans stay active)
+
+### 2. Environment Variables Security
+
+- Never commit `.env` files with sensitive information to your repository
+- Use environment variables in your deployment platforms for sensitive data
+
+### 3. Database Migration (If Applicable)
+
+If you're using a database:
+1. Ensure your database is accessible from Render
+2. Update connection strings in your environment variables
+
+### 4. Scaling and Performance
+
+- Consider upgrading to paid plans for production applications
+- Implement caching for frequently accessed data
+- Optimize API calls between frontend and backend
+
+## Part 5: Testing Your Deployment
+
+1. Visit your Cloudflare Pages URL
+2. Test all functionality to ensure it works as expected
+3. Check browser console for any errors
+4. Verify API calls are successful between frontend and backend
+5. Test audio processing and model conversion features
+
+## Conclusion
+
+Your application should now be successfully deployed with:
+- Backend running on Render
+- Frontend hosted on Cloudflare Pages
+- All environment variables correctly configured
+- CORS properly set up for communication between services
+
+For any issues, check the logs in your respective deployment platforms and review the troubleshooting sections above. 
