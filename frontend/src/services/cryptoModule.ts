@@ -5,7 +5,7 @@
 
 // Retrieve secure token from environment without leaving traces
 export const retrieveAuthToken = (): string => {
-  return import.meta.env.VITE_HUGGINGFACE_API_KEY || '';
+  return import.meta.env.VITE_ML_SERVICE_KEY || '';
 };
 
 // Get resource identifier for remote processing

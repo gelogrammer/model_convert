@@ -7,7 +7,7 @@ export const checkEnvironmentVariables = (): void => {
     'VITE_BACKEND_URL',
     'VITE_SUPABASE_URL',
     'VITE_SUPABASE_KEY',
-    'VITE_HUGGINGFACE_API_KEY'
+    'VITE_ML_SERVICE_KEY'
   ];
 
   const missingVariables = requiredVariables.filter(
@@ -20,8 +20,8 @@ export const checkEnvironmentVariables = (): void => {
   }
 
   // Check specifically for the Hugging Face API key
-  if (!import.meta.env.VITE_HUGGINGFACE_API_KEY) {
-    console.warn('VITE_HUGGINGFACE_API_KEY is not set. Advanced emotion analysis will not be available.');
+  if (!import.meta.env.VITE_ML_SERVICE_KEY) {
+    console.warn('VITE_ML_SERVICE_KEY is not set. Advanced emotion analysis will not be available.');
   }
 };
 
