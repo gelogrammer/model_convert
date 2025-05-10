@@ -11,20 +11,13 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import eventlet
-import requests
 import time
-try:
-    import torch
-    from transformers.pipelines import pipeline
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    print("Warning: transformers or torch not available. Using fallback approach for Hugging Face API.")
-    TRANSFORMERS_AVAILABLE = False
 
 # Import our model services
 from model_service import ModelService
 from audio_processor import AudioProcessor
 from asr_service import ASRService
+from api.inference_service import process_audio_inference
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -232,229 +225,16 @@ def proxy_huggingface():
         api_key = data.get('apiKey')
         audio_base64 = data.get('audio')
         
-        if not audio_base64:
-            error_msg = "Missing required audio data"
-            print(error_msg)
-            return jsonify({"status": "error", "message": error_msg}), 400
-            
-        if not api_key:
-            error_msg = "Missing API key"
-            print(error_msg)
-            return jsonify({"status": "error", "message": error_msg}), 401
+        # Use the inference service to process the audio
+        result = process_audio_inference(audio_base64, api_key, model_id)
         
-        print(f"Processing request for model: {model_id}")
-        print(f"Audio data length: {len(audio_base64)} characters")
-        print(f"API key present: {bool(api_key)}")
-        
-        # Convert base64 to bytes for local processing
-        audio_bytes = base64.b64decode(audio_base64)
-        
-        # Create temp file to process
-        temp_file_path = 'temp_audio.wav'
-        with open(temp_file_path, 'wb') as f:
-            f.write(audio_bytes)
-        
-        # Try local transformers pipeline first with more robust error handling
-        if TRANSFORMERS_AVAILABLE:
-            try:
-                print("Using transformers pipeline for emotion classification")
-                
-                # Use the specific model requested by the user
-                classifier = pipeline(
-                    "audio-classification", 
-                    model="firdhokk/speech-emotion-recognition-with-openai-whisper-large-v3",
-                    token=api_key  # Add API key to the pipeline
-                )
-                
-                # Windows doesn't support SIGALRM, use threading for timeouts
-                import threading
-                import _thread
-                
-                result = None
-                timeout_occurred = False
-                
-                def run_inference():
-                    nonlocal result
-                    result = classifier(temp_file_path)
-                
-                def timeout_function():
-                    nonlocal timeout_occurred
-                    timeout_occurred = True
-                    _thread.interrupt_main()  # Force interrupt
-                
-                # Start inference in a thread
-                inference_thread = threading.Thread(target=run_inference)
-                inference_thread.daemon = True
-                inference_thread.start()
-                
-                # Start timeout timer
-                timer = threading.Timer(25, timeout_function)
-                timer.start()
-                
-                try:
-                    # Wait for inference to complete
-                    inference_thread.join(30)  # 30 second hard timeout
-                    timer.cancel()  # Cancel timer if inference completes
-                    
-                    if timeout_occurred:
-                        raise TimeoutError("Model inference timed out")
-                        
-                    if result is not None:
-                        print("Pipeline classification result:", result)
-                        
-                        # Clean up temp file
-                        try:
-                            os.remove(temp_file_path)
-                        except:
-                            pass
-                        
-                        # Return formatted result to match expected format
-                        return jsonify({
-                            "status": "success",
-                            "result": result
-                        })
-                    else:
-                        raise Exception("Inference failed to produce a result")
-                        
-                except (KeyboardInterrupt, TimeoutError) as te:
-                    print(f"Pipeline timeout: Inference took too long")
-                    raise TimeoutError("Model inference timed out")
-                
-            except Exception as pipeline_error:
-                import traceback
-                print(f"Pipeline error: {str(pipeline_error)}")
-                print(traceback.format_exc())
-                print("Falling back to REST API")
-        else:
-            print("Transformers not available, using REST API")
-        
-        # REST API fallback with improved retry logic
-        max_retries = 3
-        retry_count = 0
-        last_error = None
-        
-        while retry_count < max_retries:
-            try:
-                # Standard REST API fallback approach
-                hf_url = f"https://api-inference.huggingface.co/models/{model_id}"
-                
-                # Standard REST API request
-                headers = {
-                    'Authorization': f'Bearer {api_key}',
-                    'Content-Type': 'application/json'
-                }
-                
-                # For audio models, the API expects the base64 string directly
-                payload = {
-                    'inputs': audio_base64
-                }
-                
-                # Make the request with a longer timeout
-                print(f"Making HuggingFace API request (attempt {retry_count + 1}/{max_retries})...")
-                hf_response = requests.post(
-                    hf_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=30
-                )
-                
-                print(f"REST API response status: {hf_response.status_code}")
-                
-                if hf_response.ok:
-                    # Process and return the response
-                    result = hf_response.json()
-                    print("REST API response:", result)
-                    
-                    # Clean up temp file
-                    try:
-                        os.remove(temp_file_path)
-                    except:
-                        pass
-                    
-                    return jsonify({
-                        "status": "success",
-                        "result": result
-                    })
-                elif hf_response.status_code == 503:
-                    # Model is loading, retry after delay
-                    retry_count += 1
-                    last_error = hf_response.text
-                    wait_time = 2 ** retry_count  # Exponential backoff (2, 4, 8 seconds)
-                    print(f"503 Service Unavailable, retrying after {wait_time} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    # Other error, return immediately
-                    error_text = hf_response.text
-                    print(f"REST API error: {error_text}")
-                    
-                    # Clean up temp file
-                    try:
-                        os.remove(temp_file_path)
-                    except:
-                        pass
-                    
-                    return jsonify({
-                        "status": "error", 
-                        "message": f"Hugging Face API error: {hf_response.status_code}", 
-                        "error": error_text,
-                        "_meta": {
-                            "using_fallback": True,
-                            "fallback_reason": f"HuggingFace API error: {hf_response.status_code}"
-                        }
-                    }), hf_response.status_code
-            
-            except requests.exceptions.Timeout:
-                retry_count += 1
-                last_error = "Request timed out after 30 seconds"
-                wait_time = 2 ** retry_count  # Exponential backoff
-                print(f"API request timed out, retrying after {wait_time} seconds...")
-                time.sleep(wait_time)
-                
-            except requests.exceptions.ConnectionError as ce:
-                retry_count += 1
-                last_error = str(ce)
-                wait_time = 2 ** retry_count  # Exponential backoff
-                print(f"Connection error, retrying after {wait_time} seconds...")
-                time.sleep(wait_time)
-        
-        # If we've exhausted all retries, fall back to a simple emotion detection
-        print(f"Failed after {max_retries} attempts, providing fallback response")
-        
-        # Clean up temp file
-        try:
-            os.remove(temp_file_path)
-        except:
-            pass
-        
-        # Extract simple emotion from filename if possible or provide neutral fallback
-        # This is just a basic fallback when the API is completely unavailable
-        fallback_result = [
-            {"label": "neutral", "score": 0.8},
-            {"label": "happy", "score": 0.1},
-            {"label": "sad", "score": 0.05},
-            {"label": "angry", "score": 0.05}
-        ]
-        
-        return jsonify({
-            "status": "success",
-            "result": fallback_result,
-            "_meta": {
-                "using_fallback": True,
-                "fallback_reason": f"HuggingFace service unavailable after {max_retries} attempts: {last_error}"
-            }
-        })
+        # Return the result
+        return jsonify(result)
         
     except Exception as e:
         import traceback
         print(f"Exception in proxy_huggingface: {str(e)}")
         print(traceback.format_exc())
-        
-        # Clean up temp file if it exists
-        try:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-        except:
-            pass
             
         return jsonify({
             "status": "error", 
