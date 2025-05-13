@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Paper, Typography, Box, List, ListItem, ListItemText, IconButton, Divider, Button, CircularProgress, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, alpha, Chip, Tooltip, TextField } from '@mui/material';
+import { Paper, Typography, Box, List, ListItem, ListItemText, IconButton, Button, CircularProgress, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, alpha, Chip, Tooltip, TextField } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -1301,16 +1301,27 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
   };
 
   return (
-    <Paper sx={{ p: 3, borderRadius: 2, bgcolor: 'rgba(10, 25, 41, 0.7)' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6" component="h2">
-          Recording History
-        </Typography>
+    <Paper sx={{
+      p: { xs: 3, md: 5 },
+      borderRadius: '24px',
+      background: 'rgba(36, 45, 66, 0.92)',
+      boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.18)',
+      border: '1.5px solid rgba(124, 58, 237, 0.10)',
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'flex-start',
+      alignItems: 'center',
+      backdropFilter: 'blur(12px)'
+    }}>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', width: '100%', mb: 3 }}>
         <Button 
           variant="outlined" 
-          size="small" 
+          size="medium" 
           onClick={loadRecordings}
           startIcon={<SettingsIcon fontSize="small" />}
+          sx={{ ml: 2, borderRadius: '12px', fontWeight: 600 }}
         >
           Refresh
         </Button>
@@ -1405,10 +1416,12 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
           </Button>
         </Box>
       ) : recordings.length > 0 ? (
-        <List sx={{ 
-          flexGrow: 1, 
+        <List sx={{
+          flexGrow: 1,
           overflowY: 'auto',
-          maxHeight: '600px', // Significantly increased maximum height to show more recordings
+          maxHeight: '600px',
+          width: '100%',
+          overflowX: 'hidden',
           '&::-webkit-scrollbar': {
             width: '8px',
           },
@@ -1420,161 +1433,179 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
             backgroundColor: 'rgba(255, 255, 255, 0.2)',
             borderRadius: '4px',
             '&:hover': {
-              backgroundColor: 'rgba(255, 255, 255, 0.3)',
+              backgroundColor: 'rgba(124,58,237,0.25)',
             }
           }
         }}>
-          {recordings.map((recording, index) => (
-            <Box key={recording.id}>
+          {recordings.map((recording) => (
+            <Box key={recording.id} sx={{ mb: 2, width: '100%', maxWidth: '100%', overflowX: 'hidden' }}>
               <ListItem
                 sx={{
-                  px: { xs: 1, sm: 2 },
-                  py: { xs: 1, sm: 1.5 },
+                  px: { xs: 2, sm: 3 },
+                  py: { xs: 2, sm: 2.5 },
                   flexDirection: { xs: 'column', sm: 'row' },
-                  alignItems: { xs: 'flex-start', sm: 'center' }
+                  alignItems: { xs: 'flex-start', sm: 'center' },
+                  background: 'rgba(255,255,255,0.03)',
+                  borderRadius: '16px',
+                  boxShadow: '0 2px 12px rgba(124,58,237,0.07)',
+                  transition: 'background 0.2s, transform 0.2s',
+                  '&:hover': {
+                    background: 'rgba(124,58,237,0.10)',
+                    transform: 'scale(1.015)',
+                  },
+                  mb: 1.5,
+                  width: '100%',
                 }}
                 secondaryAction={
-                  <Box sx={{ 
-                    display: 'flex', 
-                    gap: { xs: 0.5, sm: 0.75 },
+                  <Box sx={{
+                    display: 'flex',
+                    gap: { xs: 1, sm: 1.5 },
                     position: { xs: 'static', sm: 'absolute' },
-                    right: { xs: 'auto', sm: 16 },
+                    right: { xs: 'auto', sm: 24 },
                     mt: { xs: 1, sm: 0 },
                     width: { xs: '100%', sm: 'auto' },
                     justifyContent: { xs: 'flex-end', sm: 'flex-end' }
                   }}>
-                    <IconButton 
-                      size="small" 
-                      onClick={() => playRecording(recording.id, recording.public_url)}
-                      color={playingId === recording.id ? 'primary' : 'default'}
-                      sx={{ 
-                        p: { xs: 0.5, sm: 0.75 },
-                        minWidth: 32,
-                        minHeight: 32,
-                        backgroundColor: playingId === recording.id ? alpha('#7C3AED', 0.1) : 'transparent'
-                      }}
-                    >
-                      {playingId === recording.id ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
-                    </IconButton>
-                    
-                    <IconButton 
-                      size="small" 
-                      onClick={() => downloadRecording(recording)}
-                      sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
-                    >
-                      <DownloadIcon fontSize="small" />
-                    </IconButton>
-                    
+                    <Tooltip title={playingId === recording.id ? 'Pause' : 'Play'}>
+                      <IconButton
+                        size="medium"
+                        onClick={() => playRecording(recording.id, recording.public_url)}
+                        color={playingId === recording.id ? 'primary' : 'default'}
+                        sx={{
+                          p: 1.2,
+                          minWidth: 36,
+                          minHeight: 36,
+                          backgroundColor: playingId === recording.id ? alpha('#7C3AED', 0.13) : 'transparent',
+                          transition: 'background 0.2s'
+                        }}
+                      >
+                        {playingId === recording.id ? <PauseIcon fontSize="medium" /> : <PlayArrowIcon fontSize="medium" />}
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Download">
+                      <IconButton
+                        size="medium"
+                        onClick={() => downloadRecording(recording)}
+                        sx={{ p: 1.2, minWidth: 36, minHeight: 36 }}
+                      >
+                        <DownloadIcon fontSize="medium" />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="Analyze with model">
                       <span>
-                        <IconButton 
-                          size="small" 
+                        <IconButton
+                          size="medium"
                           onClick={() => analyzeRecording(recording)}
                           color="secondary"
                           disabled={analyzingRecordingId === recording.id}
-                          sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
+                          sx={{ p: 1.2, minWidth: 36, minHeight: 36 }}
                         >
                           {analyzingRecordingId === recording.id ? (
-                            <CircularProgress size={16} color="secondary" />
+                            <CircularProgress size={18} color="secondary" />
                           ) : (
-                            <AnalyticsIcon fontSize="small" />
+                            <AnalyticsIcon fontSize="medium" />
                           )}
                         </IconButton>
                       </span>
                     </Tooltip>
-                    
-                    <IconButton 
-                      size="small" 
-                      onClick={() => openRenameDialog(recording.id)}
-                      sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    
-                    <IconButton 
-                      size="small" 
-                      onClick={() => openDeleteConfirmation(recording.id)}
-                      color="error"
-                      sx={{ p: { xs: 0.5, sm: 0.75 }, minWidth: 32, minHeight: 32 }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    <Tooltip title="Rename">
+                      <IconButton
+                        size="medium"
+                        onClick={() => openRenameDialog(recording.id)}
+                        sx={{ p: 1.2, minWidth: 36, minHeight: 36 }}
+                      >
+                        <EditIcon fontSize="medium" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete">
+                      <IconButton
+                        size="medium"
+                        onClick={() => openDeleteConfirmation(recording.id)}
+                        color="error"
+                        sx={{ p: 1.2, minWidth: 36, minHeight: 36 }}
+                      >
+                        <DeleteIcon fontSize="medium" />
+                      </IconButton>
+                    </Tooltip>
                   </Box>
                 }
               >
                 <ListItemText
                   primary={
-                    <Box sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: 1,
-                      width: { xs: '100%', sm: 'calc(100% - 200px)' }, // Reserve space for buttons on desktop
+                    <Box sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.5,
+                      width: { xs: '100%', sm: 'calc(100% - 220px)' },
                       pr: { xs: 0, sm: 2 }
                     }}>
-                      <Typography 
-                        variant="body1" 
-                        sx={{ 
-                          overflow: 'hidden', 
-                          textOverflow: 'ellipsis', 
+                      <Typography
+                        variant="subtitle1"
+                        fontWeight={600}
+                        sx={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          fontSize: { xs: '0.9rem', sm: '1rem' }
+                          fontSize: { xs: '1.05rem', sm: '1.13rem' },
+                          letterSpacing: 0.1
                         }}
                       >
                         {recording.file_name.replace(/_/g, ' ').replace(/\.(wav|mp3|webm)$/i, '').replace(/recording/i, 'Recording')}
                       </Typography>
                       {recording.public_url.startsWith('blob:') && (
-                        <Chip 
-                          label="Local" 
-                          size="small" 
-                          color="warning" 
-                          sx={{ 
-                            height: 18, 
-                            fontSize: '0.65rem',
-                            '& .MuiChip-label': { px: 0.8 },
+                        <Chip
+                          label="Local"
+                          size="small"
+                          color="warning"
+                          sx={{
+                            height: 20,
+                            fontSize: '0.7rem',
+                            '& .MuiChip-label': { px: 1 },
                             flexShrink: 0
-                          }} 
+                          }}
                         />
                       )}
                     </Box>
                   }
                   secondary={
-                    <Typography 
-                      variant="body2" 
-                      color="text.secondary" 
-                      sx={{ 
-                        fontSize: { xs: '0.8rem', sm: '0.875rem' },
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{
+                        fontSize: { xs: '0.85rem', sm: '0.95rem' },
                         mt: 0.5
                       }}
                     >
                       {formatDate(recording.recorded_at)} • {formatDuration(recording.duration)}
                     </Typography>
                   }
-                  sx={{ 
+                  sx={{
                     ml: { xs: 0, sm: 1 },
                     width: '100%',
                     overflow: 'hidden'
                   }}
                 />
               </ListItem>
-              {index < recordings.length - 1 && <Divider />}
             </Box>
           ))}
         </List>
       ) : (
-        <Box sx={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          alignItems: 'center', 
+        <Box sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
           justifyContent: 'center',
           textAlign: 'center',
           flexGrow: 1,
-          p: 3
+          p: 4,
+          minHeight: 220
         }}>
-          <Typography variant="body1" sx={{ mb: 2 }}>
+          <ErrorOutlineIcon color="disabled" sx={{ fontSize: 48, mb: 2, opacity: 0.5 }} />
+          <Typography variant="h6" sx={{ mb: 1, fontWeight: 600, color: 'text.secondary' }}>
             No recordings yet
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {isCapturing 
+            {isCapturing
               ? "Your recording will be saved here when you stop capturing"
               : "Click 'Start Capture' to begin recording your voice"}
           </Typography>

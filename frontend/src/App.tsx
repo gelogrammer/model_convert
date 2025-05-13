@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline, alpha } from '@mui/material';
+import { Container, Box, Typography, Paper, AppBar, Toolbar, Button, CircularProgress, Badge, Alert, Snackbar, ThemeProvider, createTheme, CssBaseline, alpha, Divider } from '@mui/material';
 import EmotionDisplay from './components/EmotionDisplay';
 // import SpeechTempoDisplay from './components/SpeechRateDisplay';
 import Feedback from './components/Feedback';
@@ -709,7 +709,8 @@ function App() {
       <div className="App" style={{ 
         minHeight: '100vh', 
         position: 'relative',
-        backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.1) 0%, rgba(6, 182, 212, 0.1) 90%)', 
+        background: 'linear-gradient(135deg, #232946 0%, #1a1a2e 100%)',
+        backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.10) 0%, rgba(6, 182, 212, 0.10) 90%)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'fixed',
@@ -971,73 +972,94 @@ function App() {
                 flexDirection: { xs: 'column', md: 'row' },
                 gap: { xs: 1, md: 1.5 },
                 flexGrow: 1,
-                overflow: 'auto',
-                height: { xs: 'auto', md: 'calc(100vh - 180px)' },
-                maxHeight: { md: '650px' },
-                mx: { xs: 0.5, md: 0 }
+                mx: { xs: 0.5, md: 0 },
+                justifyContent: !isCapturing ? 'center' : undefined,
+                alignItems: !isCapturing ? 'center' : undefined
               }}>
                 {/* Left column: Speech Characteristics (was Recordings) */}
-                <Box sx={{ 
-                  width: { xs: '100%', md: '27%', lg: '25%' },
-                  height: { xs: 'auto', md: '100%' }
-                }}>
-                  <Paper sx={{ 
-                    p: { xs: 0.75, md: 1.25 }, 
-                    height: '100%',
-                    minHeight: { xs: '200px', md: '240px' },
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                    borderRadius: '12px',
-                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
-                    backdropFilter: 'blur(10px)',
-                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                {isCapturing && (
+                  <Box sx={{ 
+                    width: { xs: '100%', md: '27%', lg: '25%' },
+                    height: { xs: 'auto', md: '100%' }
                   }}>
-                    <SpeechCharacteristics
-                      characteristics={formatSpeechCharacteristics(emotionResult?.speech_characteristics || lastSpeechCharacteristics)}
-                      isCapturing={isCapturing}
-                      noPaper={true}
-                      showLastDetectedMessage={!emotionResult?.speech_characteristics && !!lastSpeechCharacteristics}
-                      showWaitingMessage={true}
-                      useASRModel={true}
-                      isUsingFallback={!isHuggingFaceAvailable}
-                    />
-                  </Paper>
-                </Box>
-                
-                {/* Middle column: Emotion Display and Recordings (was Speech Characteristics) */}
-                <Box sx={{ 
-                  width: { xs: '100%', md: '46%', lg: '50%' },
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: { xs: 1, md: 1.5 },
-                  height: { xs: 'auto', md: '100%' }
-                }}>
-                  <Paper sx={{ 
-                    p: { xs: 0.75, md: 1.25 },
-                    borderRadius: '12px',
-                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
-                    backdropFilter: 'blur(10px)',
-                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
-                    height: '100%',
-                    flexGrow: 1
-                  }}>
-                    <EmotionDisplay
-                      emotionResult={isCapturing && isSpeaking ? emotionResult : null}
-                      isCapturing={isCapturing}
-                      onSettingsChange={handleEmotionSettingsChange}
-                    />
-                  </Paper>
-                  
-                  {/* Show Recordings only when not capturing */}
-                  {!isCapturing && (
                     <Paper sx={{ 
-                      p: { xs: 0.75, md: 1.25 },
+                      p: { xs: 0.75, md: 1.25 }, 
+                      height: '100%',
+                      minHeight: { xs: '200px', md: '240px' },
+                      display: 'flex',
+                      flexDirection: 'column',
+                      overflow: 'hidden',
                       borderRadius: '12px',
                       background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
                       backdropFilter: 'blur(10px)',
                       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
                     }}>
+                      <SpeechCharacteristics
+                        characteristics={formatSpeechCharacteristics(emotionResult?.speech_characteristics || lastSpeechCharacteristics)}
+                        isCapturing={isCapturing}
+                        noPaper={true}
+                        showLastDetectedMessage={!emotionResult?.speech_characteristics && !!lastSpeechCharacteristics}
+                        showWaitingMessage={true}
+                        useASRModel={true}
+                        isUsingFallback={!isHuggingFaceAvailable}
+                      />
+                    </Paper>
+                  </Box>
+                )}
+                
+                {/* Middle column: Emotion Display and Recordings (was Speech Characteristics) */}
+                <Box sx={{ 
+                  width: !isCapturing ? { xs: '100%', md: '90%' } : { xs: '100%', md: '46%', lg: '50%' },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: { xs: 1, md: 1.5 },
+                  height: !isCapturing ? { xs: 'auto', md: '700px' } : { xs: 'auto', md: '100%' },
+                  justifyContent: !isCapturing ? 'center' : undefined,
+                  alignItems: !isCapturing ? 'center' : undefined
+                }}>
+                  {isCapturing && (
+                    <Paper sx={{ 
+                      p: { xs: 0.75, md: 1.25 },
+                      borderRadius: '12px',
+                      background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
+                      height: '100%',
+                      flexGrow: 1
+                    }}>
+                      <EmotionDisplay
+                        emotionResult={isCapturing && isSpeaking ? emotionResult : null}
+                        isCapturing={isCapturing}
+                        onSettingsChange={handleEmotionSettingsChange}
+                      />
+                    </Paper>
+                  )}
+                  
+                  {/* Show Recordings only when not capturing */}
+                  {!isCapturing && (
+                    <Paper sx={{ 
+                      p: { xs: 3, md: 5 },
+                      borderRadius: '20px',
+                      background: 'rgba(36, 45, 66, 0.85)',
+                      boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.18)',
+                      border: '1.5px solid rgba(124, 58, 237, 0.15)',
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      backdropFilter: 'blur(12px)'
+                    }}>
+                      <Box sx={{ width: '100%' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                          <Typography variant="h5" fontWeight={700} sx={{ flexGrow: 1 }}>
+                            Recording History
+                          </Typography>
+                          {/* Keep Refresh button as is */}
+                        </Box>
+                        <Divider sx={{ mb: 2, borderColor: 'rgba(124,58,237,0.15)' }} />
+                      </Box>
                       <Recordings 
                         isCapturing={isCapturing} 
                         recordingToAnalyze={latestRecordingId}
@@ -1048,24 +1070,26 @@ function App() {
                 </Box>
                 
                 {/* Right column: Feedback */}
-                <Box sx={{ 
-                  width: { xs: '100%', md: '27%', lg: '25%' },
-                  height: { xs: 'auto', md: '100%' }
-                }}>
-                  <Paper sx={{ 
-                    p: { xs: 0.75, md: 1.25 }, 
-                    height: '100%',
-                    borderRadius: '12px',
-                    background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
-                    backdropFilter: 'blur(10px)',
-                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                {isCapturing && (
+                  <Box sx={{ 
+                    width: { xs: '100%', md: '27%', lg: '25%' },
+                    height: { xs: 'auto', md: '100%' }
                   }}>
-                    <Feedback
-                      emotionResult={isCapturing ? calibratedEmotionResult : null}
-                      isCapturing={isCapturing}
-                    />
-                  </Paper>
-                </Box>
+                    <Paper sx={{ 
+                      p: { xs: 0.75, md: 1.25 }, 
+                      height: '100%',
+                      borderRadius: '12px',
+                      background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.7), rgba(30, 41, 59, 0.9))',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+                    }}>
+                      <Feedback
+                        emotionResult={isCapturing ? calibratedEmotionResult : null}
+                        isCapturing={isCapturing}
+                      />
+                    </Paper>
+                  </Box>
+                )}
               </Box>
             </>
           )}
