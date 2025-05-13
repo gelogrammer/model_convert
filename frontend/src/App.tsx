@@ -967,7 +967,7 @@ function App() {
                     }
                   }}
                 >
-                  {isCapturing ? "STOP CAPTURE" : "START CAPTURE"}
+                  {isCapturing ? "STOP RECORDING" : "START RECORDING"}
                 </Button>
               </Box>
 
