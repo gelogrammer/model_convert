@@ -255,6 +255,9 @@ function App() {
   // Add state to track HuggingFace API availability
   const [isHuggingFaceAvailable, setIsHuggingFaceAvailable] = useState(true);
   
+  // Add state for toggling instructions visibility
+  const [showInstructions, setShowInstructions] = useState(false);
+  
   // Initialize WebSocket connection
   useEffect(() => {
     // Setup WebSocket connection
@@ -965,6 +968,125 @@ function App() {
                   {isCapturing ? "STOP CAPTURE" : "START CAPTURE"}
                 </Button>
               </Box>
+
+              {/* Instructions toggle button and container - only visible when not recording */}
+              {!isCapturing && (
+                <>
+                  <Box sx={{ 
+                    mb: { xs: 1.5, md: 2 },
+                    display: 'flex',
+                    justifyContent: 'flex-start',
+                    width: '100%'
+                  }}>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      onClick={() => setShowInstructions(!showInstructions)}
+                      sx={{ 
+                        borderRadius: '12px',
+                        py: 1,
+                        px: 2,
+                        backgroundColor: alpha(theme.palette.primary.main, 0.1),
+                        '&:hover': {
+                          backgroundColor: alpha(theme.palette.primary.main, 0.2),
+                        }
+                      }}
+                    >
+                      {showInstructions ? "Hide Instructions" : "How to Use"}
+                    </Button>
+                  </Box>
+                  
+                  {showInstructions && (
+                    <Paper sx={{ 
+                      p: { xs: 1.5, md: 2 },
+                      mb: { xs: 1.5, md: 2 },
+                      borderRadius: '12px',
+                      background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.8), rgba(30, 41, 59, 0.95))',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+                      border: '1px solid rgba(124, 58, 237, 0.2)'
+                    }}>
+                      <Typography variant="body1" sx={{ mb: 1.5, fontWeight: 500, color: theme.palette.text.primary }}>
+                        Capture and analyze your speech emotion in real-time to improve your communication skills.
+                      </Typography>
+                      
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box sx={{ 
+                            minWidth: '24px', 
+                            height: '24px', 
+                            borderRadius: '50%', 
+                            bgcolor: alpha(theme.palette.primary.main, 0.2),
+                            color: theme.palette.primary.main,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            mr: 1.5,
+                            fontWeight: 700
+                          }}>1</Box>
+                          <Typography variant="body2">
+                            Click the <strong>START CAPTURE</strong> button to begin recording your voice
+                          </Typography>
+                        </Box>
+                        
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box sx={{ 
+                            minWidth: '24px', 
+                            height: '24px', 
+                            borderRadius: '50%', 
+                            bgcolor: alpha(theme.palette.primary.main, 0.2),
+                            color: theme.palette.primary.main,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            mr: 1.5,
+                            fontWeight: 700
+                          }}>2</Box>
+                          <Typography variant="body2">
+                            Speak clearly into your microphone to see real-time emotion analysis
+                          </Typography>
+                        </Box>
+                        
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box sx={{ 
+                            minWidth: '24px', 
+                            height: '24px', 
+                            borderRadius: '50%', 
+                            bgcolor: alpha(theme.palette.primary.main, 0.2),
+                            color: theme.palette.primary.main,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            mr: 1.5,
+                            fontWeight: 700
+                          }}>3</Box>
+                          <Typography variant="body2">
+                            Click <strong>STOP CAPTURE</strong> when finished to save your recording
+                          </Typography>
+                        </Box>
+                        
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box sx={{ 
+                            minWidth: '24px', 
+                            height: '24px', 
+                            borderRadius: '50%', 
+                            bgcolor: alpha(theme.palette.primary.main, 0.2),
+                            color: theme.palette.primary.main,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            mr: 1.5,
+                            fontWeight: 700
+                          }}>4</Box>
+                          <Typography variant="body2">
+                            Review past recordings below to track your progress over time
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Paper>
+                  )}
+                </>
+              )}
 
               <Box sx={{ 
                 display: 'flex', 
