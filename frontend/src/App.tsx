@@ -257,6 +257,8 @@ function App() {
   
   // Add state for toggling instructions visibility
   const [showInstructions, setShowInstructions] = useState(false);
+  // Add state for toggling system description visibility
+  const [showSystemDescription, setShowSystemDescription] = useState(false);
   
   // Initialize WebSocket connection
   useEffect(() => {
@@ -969,19 +971,23 @@ function App() {
                 </Button>
               </Box>
 
-              {/* Instructions toggle button and container - only visible when not recording */}
+              {/* Instructions and description toggle buttons - only visible when not recording */}
               {!isCapturing && (
                 <>
                   <Box sx={{ 
                     mb: { xs: 1.5, md: 2 },
                     display: 'flex',
                     justifyContent: 'flex-start',
-                    width: '100%'
+                    width: '100%',
+                    gap: 2
                   }}>
                     <Button
                       variant="outlined"
                       color="primary"
-                      onClick={() => setShowInstructions(!showInstructions)}
+                      onClick={() => {
+                        setShowInstructions(!showInstructions);
+                        if (!showInstructions) setShowSystemDescription(false);
+                      }}
                       sx={{ 
                         borderRadius: '12px',
                         py: 1,
@@ -994,8 +1000,29 @@ function App() {
                     >
                       {showInstructions ? "Hide Instructions" : "How to Use"}
                     </Button>
+                    
+                    <Button
+                      variant="outlined"
+                      color="secondary"
+                      onClick={() => {
+                        setShowSystemDescription(!showSystemDescription);
+                        if (!showSystemDescription) setShowInstructions(false);
+                      }}
+                      sx={{ 
+                        borderRadius: '12px',
+                        py: 1,
+                        px: 2,
+                        backgroundColor: alpha(theme.palette.secondary.main, 0.1),
+                        '&:hover': {
+                          backgroundColor: alpha(theme.palette.secondary.main, 0.2),
+                        }
+                      }}
+                    >
+                      {showSystemDescription ? "Hide Description" : "System Description"}
+                    </Button>
                   </Box>
                   
+                  {/* How to Use Instructions */}
                   {showInstructions && (
                     <Paper sx={{ 
                       p: { xs: 1.5, md: 2 },
@@ -1080,6 +1107,117 @@ function App() {
                           }}>4</Box>
                           <Typography variant="body2">
                             Review past recordings below to track your progress over time
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Paper>
+                  )}
+                  
+                  {/* System Description */}
+                  {showSystemDescription && (
+                    <Paper sx={{ 
+                      p: { xs: 1.5, md: 2 },
+                      mb: { xs: 1.5, md: 2 },
+                      borderRadius: '12px',
+                      background: 'linear-gradient(145deg, rgba(36, 45, 66, 0.8), rgba(30, 41, 59, 0.95))',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+                      border: '1px solid rgba(6, 182, 212, 0.2)'
+                    }}>
+                      <Typography variant="body1" sx={{ mb: 1.5, fontWeight: 500, color: theme.palette.text.primary }}>
+                        This system analyzes your speech in real-time using AI to detect emotions and speech characteristics.
+                      </Typography>
+                      
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ 
+                            color: theme.palette.secondary.main, 
+                            mb: 0.5,
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}>
+                            <Box sx={{ 
+                              width: '8px', 
+                              height: '8px', 
+                              borderRadius: '50%', 
+                              bgcolor: theme.palette.secondary.main,
+                              mr: 1
+                            }} />
+                            Emotion Analysis
+                          </Typography>
+                          <Typography variant="body2" sx={{ pl: 2.5 }}>
+                            Detects 7 emotions: anger, disgust, fear, happiness, neutral, sadness, and surprise. 
+                            Shows your dominant emotion with confidence level and emotional distribution.
+                          </Typography>
+                        </Box>
+                        
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ 
+                            color: theme.palette.secondary.main, 
+                            mb: 0.5,
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}>
+                            <Box sx={{ 
+                              width: '8px', 
+                              height: '8px', 
+                              borderRadius: '50%', 
+                              bgcolor: theme.palette.secondary.main,
+                              mr: 1
+                            }} />
+                            Speech Characteristics
+                          </Typography>
+                          <Typography variant="body2" sx={{ pl: 2.5 }}>
+                            Analyzes your speech fluency, tempo, and pronunciation quality. 
+                            Provides feedback on your speaking style to help improve communication.
+                          </Typography>
+                        </Box>
+                        
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ 
+                            color: theme.palette.secondary.main, 
+                            mb: 0.5,
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}>
+                            <Box sx={{ 
+                              width: '8px', 
+                              height: '8px', 
+                              borderRadius: '50%', 
+                              bgcolor: theme.palette.secondary.main,
+                              mr: 1
+                            }} />
+                            Personalized Feedback
+                          </Typography>
+                          <Typography variant="body2" sx={{ pl: 2.5 }}>
+                            Generates tailored recommendations based on your emotional patterns and speech characteristics.
+                            Helps you communicate more effectively with awareness of your emotional expression.
+                          </Typography>
+                        </Box>
+                        
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ 
+                            color: theme.palette.secondary.main, 
+                            mb: 0.5,
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}>
+                            <Box sx={{ 
+                              width: '8px', 
+                              height: '8px', 
+                              borderRadius: '50%', 
+                              bgcolor: theme.palette.secondary.main,
+                              mr: 1
+                            }} />
+                            Recording History
+                          </Typography>
+                          <Typography variant="body2" sx={{ pl: 2.5 }}>
+                            Saves your recordings with emotion data for later review. Compare recordings over time
+                            to track your progress and see how your communication style evolves.
                           </Typography>
                         </Box>
                       </Box>
