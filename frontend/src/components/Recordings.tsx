@@ -1801,67 +1801,43 @@ const Recordings: React.FC<RecordingsProps> = ({ isCapturing, recordingToAnalyze
         <DialogContent>
           {selectedAnalysis ? (
             <Box sx={{ mt: 1 }}>
-              {/* Overview section */}
-              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Overview</Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mb: 3 }}>
-                <Box sx={{ bgcolor: alpha('#7C3AED', 0.1), p: 2, borderRadius: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Duration</Typography>
-                  <Typography variant="h6">{selectedAnalysis.duration.toFixed(1)} seconds</Typography>
-                </Box>
-                
-                <Box sx={{ bgcolor: alpha('#10B981', 0.1), p: 2, borderRadius: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Words Spoken (est.)</Typography>
-                  <Typography variant="h6">{selectedAnalysis.wordCount} words</Typography>
-                </Box>
-                
-                <Box sx={{ bgcolor: alpha('#3B82F6', 0.1), p: 2, borderRadius: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Speech Rate</Typography>
-                  <Typography variant="h6">{selectedAnalysis.speechRate} words/min</Typography>
-                </Box>
-                
-                <Box sx={{ bgcolor: alpha('#F59E0B', 0.1), p: 2, borderRadius: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Silence Duration</Typography>
-                  <Typography variant="h6">{selectedAnalysis.silenceDuration.toFixed(1)} seconds</Typography>
-                </Box>
-                
-                {/* Dominant Emotion box */}
-                <Box sx={{ 
-                  bgcolor: alpha('#EC4899', 0.1), 
-                  p: 2, 
-                  borderRadius: 2, 
-                  gridColumn: { xs: 'auto', sm: '1 / -1' }
-                }}>
-                  <Typography variant="body2" color="text.secondary">Dominant Emotion</Typography>
-                  <Typography variant="h6" sx={{ mb: 1 }}>
-                    {(selectedAnalysis as any).dominantEmotion || "Unknown"}
-                    {selectedAnalysis.emotionProbabilities && (
-                      <Typography component="span" variant="body2" sx={{ ml: 1, color: 'text.secondary' }}>
-                        ({Math.round((selectedAnalysis.emotionProbabilities[(selectedAnalysis as any).dominantEmotion?.toLowerCase()] || 0) * 100)}%)
-                      </Typography>
-                    )}
-                  </Typography>
-                  
+              {/* Dominant Emotion box */}
+              <Box sx={{ 
+                bgcolor: alpha('#EC4899', 0.1), 
+                p: 2, 
+                borderRadius: 2, 
+                mb: 3
+              }}>
+                <Typography variant="body2" color="text.secondary">Dominant Emotion</Typography>
+                <Typography variant="h6" sx={{ mb: 1 }}>
+                  {(selectedAnalysis as any).dominantEmotion || "Unknown"}
                   {selectedAnalysis.emotionProbabilities && (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
-                      {Object.entries(selectedAnalysis.emotionProbabilities)
-                        .filter(([emotion]) => emotion !== (selectedAnalysis as any).dominantEmotion?.toLowerCase())
-                        .sort(([, a], [, b]) => (b as number) - (a as number))
-                        .map(([emotion, probability]) => (
-                          <Chip
-                            key={emotion}
-                            label={`${emotion.charAt(0).toUpperCase() + emotion.slice(1)}: ${Math.round((probability as number) * 100)}%`}
-                            size="small"
-                            sx={{
-                              height: '20px',
-                              fontSize: '0.7rem',
-                              backgroundColor: 'rgba(30, 41, 59, 0.8)',
-                              color: '#fff'
-                            }}
-                          />
-                        ))}
-                    </Box>
+                    <Typography component="span" variant="body2" sx={{ ml: 1, color: 'text.secondary' }}>
+                      ({Math.round((selectedAnalysis.emotionProbabilities[(selectedAnalysis as any).dominantEmotion?.toLowerCase()] || 0) * 100)}%)
+                    </Typography>
                   )}
-                </Box>
+                </Typography>
+                
+                {selectedAnalysis.emotionProbabilities && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
+                    {Object.entries(selectedAnalysis.emotionProbabilities)
+                      .filter(([emotion]) => emotion !== (selectedAnalysis as any).dominantEmotion?.toLowerCase())
+                      .sort(([, a], [, b]) => (b as number) - (a as number))
+                      .map(([emotion, probability]) => (
+                        <Chip
+                          key={emotion}
+                          label={`${emotion.charAt(0).toUpperCase() + emotion.slice(1)}: ${Math.round((probability as number) * 100)}%`}
+                          size="small"
+                          sx={{
+                            height: '20px',
+                            fontSize: '0.7rem',
+                            backgroundColor: 'rgba(30, 41, 59, 0.8)',
+                            color: '#fff'
+                          }}
+                        />
+                      ))}
+                  </Box>
+                )}
               </Box>
               
               {/* Emotion Analysis */}
